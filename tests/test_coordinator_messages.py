@@ -9,10 +9,12 @@ from src.agents import coordinator_agent
 from src.agents.coordinator_agent import (
     INITIAL_ERRORS_REPORT_FILENAME,
     build_review_required_result,
+    build_unsupported_source_result,
     build_workflow_result,
     CoordinatorAgent,
     filter_retryable_reports,
     format_translation_result_message,
+    is_pdf_only_latex_source,
     merge_validation_reports,
     save_initial_validation_report,
     should_run_terminology_scan,
@@ -176,6 +178,48 @@ class CoordinatorMessageTests(unittest.TestCase):
         self.assertIn("project_terms.csv", result["project_terms_path"])
         self.assertIn("project_terms_decisions.json", result["project_terms_decisions_path"])
 
+    def test_pdf_only_latex_source_is_detected(self):
+        sections = [
+            {
+                "section": "-1+0",
+                "content": (
+                    "\\documentclass[a4paper]{article}\n"
+                    "\\usepackage{pdfpages}\n"
+                    "\\begin{document}\n"
+                    "\\includepdf[pages=1-last]{paper.pdf}\n"
+                    "\\end{document}"
+                ),
+                "trans_content": "",
+            }
+        ]
+
+        self.assertTrue(is_pdf_only_latex_source(sections, captions=[], envs=[]))
+
+    def test_latex_source_with_real_section_and_pdf_appendix_is_not_pdf_only(self):
+        sections = [
+            {"section": "-1", "content": "\\documentclass{article}", "trans_content": ""},
+            {"section": "0", "content": "\\begin{document}", "trans_content": ""},
+            {
+                "section": "1",
+                "content": "\\section{Intro} We propose a method. \\includepdf{appendix.pdf}",
+                "trans_content": "",
+            },
+        ]
+
+        self.assertFalse(is_pdf_only_latex_source(sections, captions=[], envs=[]))
+
+    def test_build_unsupported_source_result_marks_workflow_not_ok(self):
+        result = build_unsupported_source_result(
+            project_name="1707.06347",
+            errors_report_path=r"outputs\ch_1707.06347\errors_report.json",
+            error="LaTeX source only embeds PDF pages.",
+        )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], "unsupported_source")
+        self.assertIsNone(result["pdf_path"])
+        self.assertIn("embeds PDF", result["error"])
+
     def test_clear_translated_content_preserves_nontranslated_sections(self):
         from src.agents.coordinator_agent import clear_translated_content
 
@@ -198,6 +242,69 @@ class CoordinatorMessageTests(unittest.TestCase):
         self.assertEqual(captions[0]["trans_content"], "")
         self.assertEqual(envs[0]["trans_content"], "")
         self.assertEqual(envs[1]["trans_content"], "")
+
+    def test_workflow_stops_on_pdf_only_latex_source_before_translation(self):
+        events = []
+
+        class FakeParserAgent:
+            def __init__(self, config, project_dir, output_dir):
+                self.output_dir = Path(output_dir)
+
+            def execute(self):
+                events.append("parser")
+                self.output_dir.mkdir(parents=True, exist_ok=True)
+                (self.output_dir / "sections_map.json").write_text(
+                    json.dumps([
+                        {
+                            "section": "-1+0",
+                            "content": (
+                                "\\documentclass{article}\n"
+                                "\\usepackage{pdfpages}\n"
+                                "\\begin{document}\n"
+                                "\\includepdf[pages=1-last]{paper.pdf}\n"
+                                "\\end{document}"
+                            ),
+                            "trans_content": "",
+                        }
+                    ], ensure_ascii=False),
+                    encoding="utf-8",
+                )
+                for filename in (
+                    "captions_map.json",
+                    "envs_map.json",
+                    "inputs_map.json",
+                    "newcommands_map.json",
+                ):
+                    (self.output_dir / filename).write_text("[]", encoding="utf-8")
+
+        translator = Mock()
+        translator.execute = AsyncMock(side_effect=lambda *args, **kwargs: events.append("translator"))
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "1707.06347")
+            output_dir = os.path.join(tmpdir, "outputs")
+            config = {
+                "source_language": "en",
+                "target_language": "ch",
+                "llm_config": {},
+                "terminology": {"enabled": False},
+            }
+            agent = CoordinatorAgent(config=config, project_dir=project_dir, output_dir=output_dir)
+            try:
+                with patch.object(coordinator_agent, "ParserAgent", FakeParserAgent), \
+                        patch.object(coordinator_agent, "TranslatorAgent", return_value=translator), \
+                        patch.object(coordinator_agent, "GeneratorAgent") as generator_cls, \
+                        patch("builtins.print"):
+                    result = agent.workflow_latextrans()
+            finally:
+                if not agent.loop.is_closed():
+                    agent.loop.close()
+
+        self.assertEqual(events, ["parser"])
+        self.assertEqual(result["status"], "unsupported_source")
+        self.assertFalse(result["ok"])
+        translator.execute.assert_not_called()
+        generator_cls.assert_not_called()
 
     def test_retranslation_workflow_reuses_existing_terms_without_parsing(self):
         events = []

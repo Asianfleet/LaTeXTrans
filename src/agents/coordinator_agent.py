@@ -1,6 +1,7 @@
 import os
 import shutil
 import json
+import re
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 import sys
@@ -126,6 +127,119 @@ def build_review_required_result(
     }
 
 
+PDF_ONLY_SOURCE_ERROR = (
+    "LaTeX source only embeds external PDF pages via \\includepdf; "
+    "no translatable LaTeX body text was found. Provide the real LaTeX source, "
+    "or run a PDF/OCR translation workflow instead."
+)
+
+
+def build_unsupported_source_result(
+    project_name: str,
+    errors_report_path: str,
+    error: str,
+) -> Dict[str, Any]:
+    return {
+        "project_name": project_name,
+        "ok": False,
+        "status": "unsupported_source",
+        "pdf_path": None,
+        "errors_report_path": errors_report_path,
+        "validation_summary": {"warnings": 0, "errors": 1, "total": 1},
+        "error": error,
+    }
+
+
+def save_unsupported_source_report(output_dir: Path, error: str) -> Path:
+    report_path = Path(output_dir) / "errors_report.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = [
+        {
+            "part": "source",
+            "num_or_ph": "project",
+            "type": "unsupported_source",
+            "severity": "error",
+            "retryable": False,
+            "message": error,
+        }
+    ]
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    return report_path
+
+
+def read_parsed_latex_maps(output_dir: Path) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def read_json_list(filename: str) -> List[Dict[str, Any]]:
+        path = Path(output_dir) / filename
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return []
+        return data if isinstance(data, list) else []
+
+    return (
+        read_json_list("sections_map.json"),
+        read_json_list("captions_map.json"),
+        read_json_list("envs_map.json"),
+    )
+
+
+def _section_ids(section_id: Any) -> set[str]:
+    return {part.strip() for part in str(section_id).split("+") if part.strip()}
+
+
+def _contains_included_pdf(content: str) -> bool:
+    return bool(re.search(r"\\includepdf(?:\s*\[[^\]]*\])?\s*\{", content or ""))
+
+
+def _document_body(content: str) -> str:
+    match = re.search(r"\\begin\s*\{document\}", content or "")
+    if not match:
+        return content or ""
+    return content[match.end():]
+
+
+def _visible_text_without_pdf_includes(content: str) -> str:
+    text = re.sub(r"\\includepdf(?:\s*\[[^\]]*\])?\s*\{[^{}]*\}", " ", content or "")
+    text = re.sub(r"<PLACEHOLDER_[^>]+>", " ", text)
+    text = re.sub(r"\\(?:begin|end)\s*\{[^{}]*\}", " ", text)
+    text = re.sub(r"\\[a-zA-Z]+\*?(?:\s*\[[^\]]*\])?(?:\s*\{[^{}]*\})?", " ", text)
+    text = re.sub(r"[{}\\$&_^%#~]", " ", text)
+    return " ".join(text.split())
+
+
+def _has_translatable_latex_body(sections: List[Dict[str, Any]], envs: List[Dict[str, Any]]) -> bool:
+    for section in sections:
+        ids = _section_ids(section.get("section"))
+        if ids == {"-1"}:
+            continue
+
+        content = section.get("content", "")
+        if ids and ids.issubset({"-1", "0"}):
+            content = _document_body(content)
+
+        if _visible_text_without_pdf_includes(content):
+            return True
+
+    for env in envs:
+        if env.get("need_trans") and _visible_text_without_pdf_includes(env.get("content", "")):
+            return True
+
+    return False
+
+
+def is_pdf_only_latex_source(
+    sections: List[Dict[str, Any]],
+    captions: List[Dict[str, Any]],
+    envs: List[Dict[str, Any]],
+) -> bool:
+    del captions
+    if not isinstance(sections, list) or not isinstance(envs, list):
+        return False
+    combined_source = "\n".join(section.get("content", "") for section in sections)
+    combined_source += "\n".join(env.get("content", "") for env in envs)
+    return _contains_included_pdf(combined_source) and not _has_translatable_latex_body(sections, envs)
+
+
 def clear_translated_content(
     sections: List[Dict[str, Any]],
     captions: List[Dict[str, Any]],
@@ -218,6 +332,17 @@ class CoordinatorAgent:
                                    project_dir=self.project_dir,
                                    output_dir=transed_project_dir)
         parser_agent.execute()  
+
+        sections, captions, envs = read_parsed_latex_maps(Path(transed_project_dir))
+        errors_report_path = os.path.join(transed_project_dir, "errors_report.json")
+        if is_pdf_only_latex_source(sections, captions, envs):
+            save_unsupported_source_report(Path(transed_project_dir), PDF_ONLY_SOURCE_ERROR)
+            print(f"🤖❌ {self.name}: {PDF_ONLY_SOURCE_ERROR} Error report: {errors_report_path}.")
+            return build_unsupported_source_result(
+                project_name=base_name,
+                errors_report_path=errors_report_path,
+                error=PDF_ONLY_SOURCE_ERROR,
+            )
 
         terminology_config = TerminologyConfig.from_config(self.config or {})
         if should_run_terminology_scan(self.config or {}):
@@ -345,6 +470,15 @@ class CoordinatorAgent:
         sections = translator_agent.read_file(Path(transed_project_dir, "sections_map.json"), "json")
         captions = translator_agent.read_file(Path(transed_project_dir, "captions_map.json"), "json")
         envs = translator_agent.read_file(Path(transed_project_dir, "envs_map.json"), "json")
+        errors_report_path = os.path.join(transed_project_dir, "errors_report.json")
+        if is_pdf_only_latex_source(sections, captions, envs):
+            save_unsupported_source_report(Path(transed_project_dir), PDF_ONLY_SOURCE_ERROR)
+            return build_unsupported_source_result(
+                project_name=base_name,
+                errors_report_path=errors_report_path,
+                error=PDF_ONLY_SOURCE_ERROR,
+            )
+
         clear_translated_content(sections, captions, envs)
         translator_agent.save_file(Path(transed_project_dir, "sections_map.json"), "json", sections)
         translator_agent.save_file(Path(transed_project_dir, "captions_map.json"), "json", captions)
@@ -375,7 +509,6 @@ class CoordinatorAgent:
 
         validation_summary = summarize_validation_reports(errors_report or [])
         validation_failed = self.validation_policy.should_fail(validation_summary)
-        errors_report_path = os.path.join(transed_project_dir, "errors_report.json")
 
         if not should_generate_pdf_after_validation(
             validation_summary=validation_summary,
