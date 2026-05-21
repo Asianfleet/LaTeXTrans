@@ -656,8 +656,6 @@ def remove_local_cjkutf8_wrappers(latex_code):
 
 def add_language_support_package(latex_code, target_language):
     normalized = normalize_target_language(target_language)
-    if normalized in {"ch", "cn", "zh"} and has_global_cjkutf8_document_environment(latex_code):
-        return normalize_cjkutf8_environment_spacing(latex_code)
     if normalized in {"ch", "cn", "zh"}:
         latex_code = remove_local_cjkutf8_wrappers(latex_code)
 

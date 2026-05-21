@@ -62,7 +62,7 @@ class LatexLanguagePackageTests(unittest.TestCase):
 
         self.assertEqual(result.count("\\usepackage{luatexja}"), 1)
 
-    def test_chinese_target_does_not_mix_ctex_with_existing_cjkutf8(self):
+    def test_chinese_target_replaces_global_cjkutf8_with_ctex(self):
         tex = (
             "\\documentclass{article}\n"
             "\\usepackage{CJKutf8}\n"
@@ -75,14 +75,15 @@ class LatexLanguagePackageTests(unittest.TestCase):
 
         result = add_language_support_package(tex, "ch")
 
-        self.assertNotIn("\\usepackage[UTF8]{ctex}", result)
-        self.assertIn("\\usepackage{CJKutf8}", result)
-        self.assertIn("\\begin{CJK}{UTF8}{gbsn}", result)
-        self.assertIn("\\end{CJK}", result)
+        self.assertIn("\\usepackage[UTF8]{ctex}", result)
+        self.assertNotIn("\\usepackage{CJKutf8}", result)
+        self.assertNotIn("\\begin{CJK}", result)
+        self.assertNotIn("\\end{CJK}", result)
         self.assertNotIn("\\begin{CJK*}", result)
         self.assertNotIn("\\end{CJK*}", result)
+        self.assertIn("本文", result)
 
-    def test_chinese_target_converts_cjk_star_to_preserve_mixed_script_spaces(self):
+    def test_chinese_target_removes_cjk_star_and_preserves_mixed_script_spaces(self):
         tex = (
             "\\documentclass{article}\n"
             "\\usepackage{CJKutf8}\n"
@@ -97,8 +98,10 @@ class LatexLanguagePackageTests(unittest.TestCase):
 
         self.assertIn("介绍了 DeepSeekMath 7B", result)
         self.assertIn("来自 Common Crawl 的 120B", result)
-        self.assertIn("\\begin{CJK}{UTF8}{gbsn}", result)
-        self.assertIn("\\end{CJK}", result)
+        self.assertIn("\\usepackage[UTF8]{ctex}", result)
+        self.assertNotIn("\\usepackage{CJKutf8}", result)
+        self.assertNotIn("\\begin{CJK}", result)
+        self.assertNotIn("\\end{CJK}", result)
         self.assertNotIn("\\begin{CJK*}", result)
         self.assertNotIn("\\end{CJK*}", result)
 
