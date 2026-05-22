@@ -27,6 +27,9 @@ Tests currently use the standard `unittest` framework. Add tests under `tests/` 
 - When removing legacy compatibility, clean it up thoroughly. Do not only update configuration examples or entry-point parameters; also inspect and remove leftover compatibility logic in low-level helpers, alias mappings, fallback branches, and old tests to keep documentation and runtime behavior from drifting again.
 - Future development should not assume English-to-Chinese translation by default. Any work involving translation direction, prompts, glossaries, language configuration, or tests should be reviewed for multilingual support. If the user mentions only one case, such as "English-to-Chinese", pause first to note that it may affect multilingual capability and confirm whether the change should target only that language pair.
 - New tool agents should log their `execute()` flow through `BaseToolAgent.log`, including start, key processing milestones, failure branches, and successful output paths, so workflow logs remain consistent across agents.
+- 远程下载 helper 不能只清理网络异常；文件打开或写入阶段的 `OSError` 也要清理半成品 archive，避免后续 `--all-existing` 或解压流程误处理坏包。
+- 批量输入的 skip 语义需要覆盖“部分失败、部分成功继续处理”的回归测试，不能只测单个失败后整体报错。
+- 新增显式输入参数时，要同步检查 `--all-existing` 的优先级说明、help 文案和 README，避免文档仍只提旧参数。
 
 ## Commit & Pull Request Guidelines
 
