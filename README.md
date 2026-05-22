@@ -227,6 +227,24 @@ Supported archive formats are `.zip`, `.tar`, `.tar.gz`, and `.tgz`.
 latextrans --project D:\paper_a,D:\paper_b,D:\paper_c.zip
 ```
 
+## Translate from a Remote Source Archive URL
+
+Pass a public remote archive URL directly:
+
+```bash
+latextrans --project-url https://example.org/paper_source.tar.gz
+```
+
+`--project-url` supports public `http`/`https` archive URLs only. Supported formats are `.zip`, `.tar`, `.tar.gz`, and `.tgz`.
+
+This first-stage implementation does not support HTML download pages, DOI or record pages, repository URLs, or authenticated downloads.
+
+You can combine it with other explicit inputs:
+
+```bash
+latextrans --arxiv 2508.18791 --project-url https://example.org/paper_source.tar.gz
+```
+
 ## Process Existing Sources
 
 To process every project already under `tex_sources_dir`:

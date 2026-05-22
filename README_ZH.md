@@ -227,6 +227,24 @@ latextrans --project D:\path\to\paper_source.tar.gz
 latextrans --project D:\paper_a,D:\paper_b,D:\paper_c.zip
 ```
 
+## 通过远程源码压缩包 URL 翻译
+
+可以直接传入公开可访问的远程压缩包 URL：
+
+```bash
+latextrans --project-url https://example.org/paper_source.tar.gz
+```
+
+`--project-url` 第一阶段仅支持公开 `http`/`https` 压缩包直链。支持的格式包括 `.zip`、`.tar`、`.tar.gz` 和 `.tgz`。
+
+当前阶段不支持 HTML 下载页、DOI 或 record 页面、repo URL，以及需要认证的下载。
+
+它也可以与其他显式输入组合使用：
+
+```bash
+latextrans --arxiv 2508.18791 --project-url https://example.org/paper_source.tar.gz
+```
+
 ## 处理已有源码目录
 
 处理 `tex_sources_dir` 下已有的所有项目：
