@@ -181,6 +181,39 @@ target_language = "ch"
         self.assertEqual(projects_dir, str(source_dir.resolve()))
         self.assertEqual(returned_output_dir, str(output_dir.resolve()))
 
+    def test_prepare_projects_combines_local_and_remote_inputs(self):
+        from src.runtime import prepare_projects
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            local_project = tmp_path / "local-paper"
+            local_project.mkdir()
+            source_dir = tmp_path / "tex-source"
+            output_dir = tmp_path / "outputs"
+            extracted_project = source_dir / "remote-paper"
+            config = {
+                "paper_list": [],
+                "tex_sources_dir": str(source_dir),
+                "output_dir": str(output_dir),
+            }
+
+            with patch("src.runtime.download_remote_archive", return_value=str(source_dir / "remote-paper.zip")):
+                with patch("src.runtime.extract_local_archive", return_value=str(extracted_project)):
+                    projects, _, _, _ = prepare_projects(
+                        config=config,
+                        project_items=[str(local_project)],
+                        project_url_items=["https://example.test/remote-paper.zip"],
+                        all_existing=False,
+                    )
+
+        self.assertEqual(
+            projects,
+            [
+                str(local_project.resolve()),
+                str(extracted_project.resolve()),
+            ],
+        )
+
     def test_prepare_projects_removes_downloaded_remote_archive_after_extract(self):
         from src.runtime import prepare_projects
 
