@@ -162,6 +162,7 @@ def load_runtime_config(
 def prepare_projects(
     config: Dict[str, Any],
     project_items: Optional[Iterable[str]] = None,
+    project_url_items: Optional[Iterable[str]] = None,
     all_existing: bool = False,
 ) -> tuple[List[str], Dict[str, Any], str, str]:
     input_items = config.get("paper_list", [])

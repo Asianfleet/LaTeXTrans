@@ -69,6 +69,12 @@ def main():
         default=[],
         help="Local project path(s) or archive path(s), comma-separated.",
     )
+    parser.add_argument(
+        "--project-url",
+        nargs="+",
+        default=[],
+        help="Remote project archive URL(s), comma-separated.",
+    )
     parser.add_argument("--output", type=str, default="", help="output directory.")
     parser.add_argument("--source", type=str, default="", help="tex source directory.")
     parser.add_argument(
@@ -86,6 +92,7 @@ def main():
     args = parser.parse_args()
     arxiv_items = runtime.split_cli_items(args.arxiv)
     project_items = runtime.split_cli_items(args.project)
+    project_url_items = runtime.split_cli_items(args.project_url)
     config = runtime.load_runtime_config(
         config_path=args.config,
         overrides={
@@ -101,6 +108,7 @@ def main():
     projects, config, _projects_dir, output_dir = runtime.prepare_projects(
         config=config,
         project_items=project_items,
+        project_url_items=project_url_items,
         all_existing=args.all_existing,
     )
     target_language = config.get("target_language", "ch")

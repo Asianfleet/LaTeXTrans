@@ -83,6 +83,7 @@ target_language = "ch"
         prepare_projects.assert_called_once_with(
             config=runtime_config,
             project_items=[str(project_dir)],
+            project_url_items=[],
             all_existing=False,
         )
         run_projects_mock.assert_called_once()
@@ -110,6 +111,44 @@ target_language = "ch"
 
         overrides = load_config.call_args.kwargs["overrides"]
         self.assertNotEqual(overrides.get("retranslate_with_terms"), False)
+
+    def test_cli_passes_project_url_items_to_prepare_projects(self):
+        import main
+
+        runtime_config = {"target_language": "ch", "paper_list": []}
+        argv = [
+            "latextrans",
+            "--config",
+            "config/test.toml",
+            "--project-url",
+            "https://example.test/paper.tar.gz,https://example.test/paper2.zip",
+        ]
+
+        with patch.object(main.sys, "argv", argv):
+            with patch("src.runtime.load_runtime_config", return_value=runtime_config):
+                with patch(
+                    "src.runtime.prepare_projects",
+                    return_value=(["paper"], runtime_config, "tex-source", "outputs"),
+                ) as prepare_projects:
+                    with patch(
+                        "src.runtime.run_projects",
+                        return_value={
+                            "completed_projects": [{"project_name": "paper"}],
+                            "failed_projects": [],
+                        },
+                    ):
+                        with redirect_stdout(StringIO()):
+                            main.main()
+
+        prepare_projects.assert_called_once_with(
+            config=runtime_config,
+            project_items=[],
+            project_url_items=[
+                "https://example.test/paper.tar.gz",
+                "https://example.test/paper2.zip",
+            ],
+            all_existing=False,
+        )
 
     def test_cli_passes_runtime_config_overrides(self):
         import main
