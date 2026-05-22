@@ -203,6 +203,7 @@ def prepare_projects(
             try:
                 archive_path = download_remote_archive(project_url, projects_dir)
                 projects.append(extract_local_archive(archive_path, projects_dir))
+                Path(archive_path).unlink(missing_ok=True)
             except RemoteArchiveDownloadError as e:
                 print(f"[SKIP] Failed to download remote archive {project_url}: {e}")
             except Exception as e:
@@ -362,6 +363,7 @@ def run_translation(
     config_path: str = "config/default.toml",
     overrides: Optional[Dict[str, Any]] = None,
     project_items: Optional[Iterable[str]] = None,
+    project_url_items: Optional[Iterable[str]] = None,
     all_existing: bool = False,
     event_callback: Optional[ProjectEventCallback] = None,
 ) -> Dict[str, Any]:
@@ -369,6 +371,7 @@ def run_translation(
     projects, config, projects_dir, output_dir = prepare_projects(
         config=config,
         project_items=project_items,
+        project_url_items=project_url_items,
         all_existing=all_existing,
     )
     project_status = run_projects(

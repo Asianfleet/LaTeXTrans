@@ -181,6 +181,34 @@ target_language = "ch"
         self.assertEqual(projects_dir, str(source_dir.resolve()))
         self.assertEqual(returned_output_dir, str(output_dir.resolve()))
 
+    def test_prepare_projects_removes_downloaded_remote_archive_after_extract(self):
+        from src.runtime import prepare_projects
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            source_dir = tmp_path / "tex-source"
+            output_dir = tmp_path / "outputs"
+            config = {
+                "paper_list": [],
+                "tex_sources_dir": str(source_dir),
+                "output_dir": str(output_dir),
+            }
+            source_dir.mkdir()
+            downloaded_archive = source_dir / "paper.tar.gz"
+            downloaded_archive.write_bytes(b"archive-bytes")
+            extracted_project = source_dir / "paper"
+
+            with patch("src.runtime.download_remote_archive", return_value=str(downloaded_archive)):
+                with patch("src.runtime.extract_local_archive", return_value=str(extracted_project)):
+                    prepare_projects(
+                        config=config,
+                        project_items=[],
+                        project_url_items=["https://example.test/paper.tar.gz"],
+                        all_existing=False,
+                    )
+
+            self.assertFalse(downloaded_archive.exists())
+
     def test_prepare_projects_skips_failed_remote_archives(self):
         from src.runtime import prepare_projects
         from src.project_sources import RemoteArchiveDownloadError
@@ -207,6 +235,30 @@ target_language = "ch"
                         )
 
         self.assertIn("[SKIP] Failed to download remote archive https://example.test/download", stdout.getvalue())
+
+    def test_run_translation_passes_project_url_items_to_prepare_projects(self):
+        from src.runtime import run_translation
+
+        runtime_config = {"target_language": "ch", "paper_list": []}
+        prepared_projects = [r"D:\paper"]
+
+        with patch("src.runtime.load_runtime_config", return_value=runtime_config):
+            with patch(
+                "src.runtime.prepare_projects",
+                return_value=(prepared_projects, runtime_config, "tex-source", "outputs"),
+            ) as prepare_projects:
+                with patch(
+                    "src.runtime.run_projects",
+                    return_value={"completed_projects": [], "failed_projects": []},
+                ):
+                    run_translation(project_url_items=["https://example.test/paper.tar.gz"])
+
+        prepare_projects.assert_called_once_with(
+            config=runtime_config,
+            project_items=None,
+            project_url_items=["https://example.test/paper.tar.gz"],
+            all_existing=False,
+        )
 
     def test_cli_passes_runtime_config_overrides(self):
         import main
