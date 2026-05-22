@@ -50,6 +50,33 @@ class ProjectSourcesTests(unittest.TestCase):
             self.assertEqual(saved.read_bytes(), b"PKDATA")
             self.assertEqual(saved.suffix, ".zip")
 
+    def test_download_remote_archive_renames_duplicate_tar_gz_archive(self):
+        first_response = _FakeResponse(
+            headers={"Content-Type": "application/gzip"},
+            chunks=[b"FIRST"],
+        )
+        second_response = _FakeResponse(
+            headers={"Content-Type": "application/gzip"},
+            chunks=[b"SECOND"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch(
+                "src.project_sources.requests.get",
+                side_effect=[first_response, second_response],
+            ):
+                first_archive = download_remote_archive(
+                    "https://example.test/paper.tar.gz",
+                    tmp_dir,
+                )
+                second_archive = download_remote_archive(
+                    "https://example.test/paper.tar.gz",
+                    tmp_dir,
+                )
+
+            self.assertEqual(Path(first_archive).name, "paper.tar.gz")
+            self.assertEqual(Path(second_archive).name, "paper_1.tar.gz")
+
     def test_download_remote_archive_rejects_html_response(self):
         response = _FakeResponse(
             headers={"Content-Type": "text/html; charset=utf-8"},

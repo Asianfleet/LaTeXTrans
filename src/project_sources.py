@@ -40,6 +40,15 @@ def _looks_like_supported_archive(url: str, headers: dict[str, str]) -> bool:
     return any(token in content_type for token in ("zip", "gzip", "x-tar", "tar"))
 
 
+def _split_archive_name(filename: str) -> tuple[str, str]:
+    lower_filename = filename.lower()
+    for suffix in sorted(SUPPORTED_ARCHIVE_SUFFIXES, key=len, reverse=True):
+        if lower_filename.endswith(suffix):
+            return filename[: -len(suffix)], filename[-len(suffix) :]
+    path = Path(filename)
+    return path.stem, path.suffix
+
+
 def download_remote_archive(url: str, projects_dir: str) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
@@ -65,8 +74,7 @@ def download_remote_archive(url: str, projects_dir: str) -> str:
             filename = Path(_guess_archive_name(url, headers)).name
             destination = target_dir / filename
             if destination.exists():
-                stem = destination.stem
-                suffix = "".join(destination.suffixes)
+                stem, suffix = _split_archive_name(destination.name)
                 index = 1
                 while destination.exists():
                     destination = target_dir / f"{stem}_{index}{suffix}"
