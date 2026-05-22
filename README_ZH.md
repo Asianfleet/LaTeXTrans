@@ -253,7 +253,7 @@ latextrans --arxiv 2508.18791 --project-url https://example.org/paper_source.tar
 latextrans --all-existing
 ```
 
-当提供 `--arxiv` 或 `--project` 时，LaTeXTransPlus 只处理这些显式输入，并忽略 `tex source` 下其他已有目录。
+当提供 `--arxiv`、`--project` 或 `--project-url` 时，LaTeXTransPlus 只处理这些显式输入，并忽略 `tex source` 下其他已有目录。
 
 ## 使用自定义配置或覆盖路径
 

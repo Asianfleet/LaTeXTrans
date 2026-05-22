@@ -302,6 +302,45 @@ target_language = "ch"
 
         self.assertIn("[SKIP] Failed to download remote archive https://example.test/download", stdout.getvalue())
 
+    def test_prepare_projects_continues_after_one_remote_archive_fails(self):
+        from src.runtime import prepare_projects
+        from src.project_sources import RemoteArchiveDownloadError
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            source_dir = tmp_path / "tex-source"
+            output_dir = tmp_path / "outputs"
+            extracted_project = source_dir / "paper"
+            config = {
+                "paper_list": [],
+                "tex_sources_dir": str(source_dir),
+                "output_dir": str(output_dir),
+            }
+
+            with patch(
+                "src.runtime.download_remote_archive",
+                side_effect=[
+                    RemoteArchiveDownloadError("Response is not a supported archive."),
+                    str(source_dir / "paper.zip"),
+                ],
+            ) as download_mock:
+                with patch("src.runtime.extract_local_archive", return_value=str(extracted_project)) as extract_mock:
+                    with redirect_stdout(StringIO()) as stdout:
+                        projects, _, _, _ = prepare_projects(
+                            config=config,
+                            project_items=[],
+                            project_url_items=[
+                                "https://example.test/bad",
+                                "https://example.test/paper.zip",
+                            ],
+                            all_existing=False,
+                        )
+
+        self.assertEqual(projects, [str(extracted_project.resolve())])
+        self.assertEqual(download_mock.call_count, 2)
+        extract_mock.assert_called_once_with(str(source_dir / "paper.zip"), str(source_dir))
+        self.assertIn("[SKIP] Failed to download remote archive https://example.test/bad", stdout.getvalue())
+
     def test_run_translation_passes_project_url_items_to_prepare_projects(self):
         from src.runtime import run_translation
 

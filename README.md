@@ -253,7 +253,7 @@ To process every project already under `tex_sources_dir`:
 latextrans --all-existing
 ```
 
-When `--arxiv` or `--project` is provided, LaTeXTransPlus processes only those explicit inputs and ignores other existing folders under `tex source`.
+When `--arxiv`, `--project`, or `--project-url` is provided, LaTeXTransPlus processes only those explicit inputs and ignores other existing folders under `tex source`.
 
 ## Use a Custom Config or Override Paths
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Mapping
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 from requests.structures import CaseInsensitiveDict
@@ -16,22 +16,45 @@ class RemoteArchiveDownloadError(ValueError):
 
 
 def _filename_from_content_disposition(value: str) -> str | None:
-    match = re.search(r'filename="?([^";]+)"?', value or "")
+    extended_match = re.search(r"filename\*\s*=\s*([^;]+)", value or "", re.IGNORECASE)
+    if extended_match:
+        raw_filename = extended_match.group(1).strip().strip('"')
+        if "''" in raw_filename:
+            raw_filename = raw_filename.split("''", 1)[1]
+        return Path(unquote(raw_filename)).name
+
+    match = re.search(r'filename\s*=\s*"?([^";]+)"?', value or "", re.IGNORECASE)
     if match:
         return Path(match.group(1)).name
     return None
 
 
+def _suffix_from_content_type(content_type: str) -> str | None:
+    content_type = content_type.lower()
+    if "zip" in content_type:
+        return ".zip"
+    if "gzip" in content_type:
+        return ".tar.gz"
+    if "x-tar" in content_type or "tar" in content_type:
+        return ".tar"
+    return None
+
+
 def _guess_archive_name(url: str, headers: Mapping[str, str]) -> str:
+    content_suffix = _suffix_from_content_type(headers.get("Content-Type", ""))
     disposition_name = _filename_from_content_disposition(
         headers.get("Content-Disposition", "")
     )
     if disposition_name:
+        if not disposition_name.lower().endswith(SUPPORTED_ARCHIVE_SUFFIXES) and content_suffix:
+            return f"{disposition_name}{content_suffix}"
         return disposition_name
     path_name = Path(urlparse(url).path).name
     if path_name:
+        if not path_name.lower().endswith(SUPPORTED_ARCHIVE_SUFFIXES) and content_suffix:
+            return f"{path_name}{content_suffix}"
         return path_name
-    return "downloaded-archive.zip"
+    return f"downloaded-archive{content_suffix or '.zip'}"
 
 
 def _looks_like_supported_archive(url: str, headers: Mapping[str, str]) -> bool:
@@ -87,7 +110,9 @@ def download_remote_archive(url: str, projects_dir: str) -> str:
                 for chunk in response.iter_content(8192):
                     if chunk:
                         handle.write(chunk)
-    except requests.RequestException as exc:
+    except RemoteArchiveDownloadError:
+        raise
+    except (requests.RequestException, OSError) as exc:
         if destination is not None and destination.exists():
             destination.unlink()
         raise RemoteArchiveDownloadError(

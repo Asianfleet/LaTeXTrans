@@ -1,3 +1,4 @@
+import builtins
 import tempfile
 import unittest
 from pathlib import Path
@@ -76,6 +77,43 @@ class ProjectSourcesTests(unittest.TestCase):
             self.assertEqual(saved.name, "paper.zip")
             self.assertEqual(saved.read_bytes(), b"ZIPDATA")
 
+    def test_download_remote_archive_accepts_rfc5987_filename(self):
+        response = _FakeResponse(
+            headers={
+                "Content-Type": "application/zip",
+                "Content-Disposition": "attachment; filename*=UTF-8''paper%20source.zip",
+            },
+            chunks=[b"ZIPDATA"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch("src.project_sources.requests.get", return_value=response):
+                archive_path = download_remote_archive(
+                    "https://example.test/download",
+                    tmp_dir,
+                )
+
+            saved = Path(archive_path)
+            self.assertEqual(saved.name, "paper source.zip")
+            self.assertEqual(saved.read_bytes(), b"ZIPDATA")
+
+    def test_download_remote_archive_adds_suffix_from_content_type(self):
+        response = _FakeResponse(
+            headers={"Content-Type": "application/zip"},
+            chunks=[b"ZIPDATA"],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch("src.project_sources.requests.get", return_value=response):
+                archive_path = download_remote_archive(
+                    "https://example.test/download",
+                    tmp_dir,
+                )
+
+            saved = Path(archive_path)
+            self.assertEqual(saved.name, "download.zip")
+            self.assertEqual(saved.read_bytes(), b"ZIPDATA")
+
     def test_download_remote_archive_renames_duplicate_tar_gz_archive(self):
         first_response = _FakeResponse(
             headers={"Content-Type": "application/gzip"},
@@ -119,6 +157,31 @@ class ProjectSourcesTests(unittest.TestCase):
                     "Failed to download remote archive",
                 ):
                     download_remote_archive("https://example.test/paper.zip", tmp_dir)
+
+            self.assertEqual(list(Path(tmp_dir).iterdir()), [])
+
+    def test_download_remote_archive_cleans_partial_file_on_write_exception(self):
+        response = _FakeResponse(
+            headers={"Content-Type": "application/zip"},
+            chunks=[b"ZIPDATA"],
+        )
+
+        def fail_after_creating_file(path_self, mode="r", *args, **kwargs):
+            if path_self.name == "paper.zip" and "w" in mode:
+                with builtins.open(path_self, "wb") as handle:
+                    handle.write(b"PARTIAL")
+                raise OSError("disk full")
+            return original_open(path_self, mode, *args, **kwargs)
+
+        original_open = Path.open
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            with patch("src.project_sources.requests.get", return_value=response):
+                with patch("pathlib.Path.open", fail_after_creating_file):
+                    with self.assertRaisesRegex(
+                        RemoteArchiveDownloadError,
+                        "Failed to download remote archive",
+                    ):
+                        download_remote_archive("https://example.test/paper.zip", tmp_dir)
 
             self.assertEqual(list(Path(tmp_dir).iterdir()), [])
 
