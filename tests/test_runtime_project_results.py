@@ -242,6 +242,39 @@ target_language = "ch"
 
             self.assertFalse(downloaded_archive.exists())
 
+    def test_prepare_projects_removes_downloaded_remote_archive_after_extract_failure(self):
+        from src.runtime import prepare_projects
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            source_dir = tmp_path / "tex-source"
+            output_dir = tmp_path / "outputs"
+            config = {
+                "paper_list": [],
+                "tex_sources_dir": str(source_dir),
+                "output_dir": str(output_dir),
+            }
+            source_dir.mkdir()
+            downloaded_archive = source_dir / "paper.tar.gz"
+            downloaded_archive.write_bytes(b"archive-bytes")
+
+            with patch("src.runtime.download_remote_archive", return_value=str(downloaded_archive)):
+                with patch("src.runtime.extract_local_archive", side_effect=ValueError("broken archive")):
+                    with self.assertRaisesRegex(ValueError, "No valid TeX projects available for processing."):
+                        with redirect_stdout(StringIO()) as stdout:
+                            prepare_projects(
+                                config=config,
+                                project_items=[],
+                                project_url_items=["https://example.test/paper.tar.gz"],
+                                all_existing=False,
+                            )
+
+            self.assertFalse(downloaded_archive.exists())
+            self.assertIn(
+                "[SKIP] Failed to extract remote archive https://example.test/paper.tar.gz: broken archive",
+                stdout.getvalue(),
+            )
+
     def test_prepare_projects_skips_failed_remote_archives(self):
         from src.runtime import prepare_projects
         from src.project_sources import RemoteArchiveDownloadError

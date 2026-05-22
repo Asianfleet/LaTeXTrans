@@ -200,14 +200,20 @@ def prepare_projects(
             print(f"[SKIP] Invalid local project path: {project_path}")
 
         for project_url in project_url_items:
+            archive_path: Optional[str] = None
             try:
                 archive_path = download_remote_archive(project_url, projects_dir)
                 projects.append(extract_local_archive(archive_path, projects_dir))
-                Path(archive_path).unlink(missing_ok=True)
             except RemoteArchiveDownloadError as e:
                 print(f"[SKIP] Failed to download remote archive {project_url}: {e}")
             except Exception as e:
                 print(f"[SKIP] Failed to extract remote archive {project_url}: {e}")
+            finally:
+                if archive_path:
+                    try:
+                        Path(archive_path).unlink(missing_ok=True)
+                    except OSError:
+                        pass
     elif all_existing:
         print("No explicit inputs. Processing all existing projects in the specified directory.")
         extract_compressed_files(projects_dir)

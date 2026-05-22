@@ -80,7 +80,7 @@ def main():
     parser.add_argument(
         "--all-existing",
         action="store_true",
-        help="Process all existing projects under tex source directory when no --arxiv/--project is provided.",
+        help="Process all existing projects under tex source directory when no explicit --arxiv, --project, or --project-url input is provided.",
     )
     parser.add_argument(
         "--retranslate-with-terms",
