@@ -16,6 +16,7 @@ from src.formats.latex.utils import (
     get_arxiv_category,
     get_profect_dirs,
 )
+from src.project_sources import RemoteArchiveDownloadError, download_remote_archive
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ProjectEventCallback = Callable[[Dict[str, Any]], None]
@@ -174,8 +175,9 @@ def prepare_projects(
 
     paper_list = extract_arxiv_ids(input_items)
     project_items = [item for item in (project_items or []) if item]
+    project_url_items = [item for item in (project_url_items or []) if item]
 
-    if paper_list or project_items:
+    if paper_list or project_items or project_url_items:
         projects: List[str] = []
 
         if paper_list:
@@ -196,6 +198,15 @@ def prepare_projects(
                     print(f"[SKIP] Failed to extract local archive {project_path}: {e}")
                 continue
             print(f"[SKIP] Invalid local project path: {project_path}")
+
+        for project_url in project_url_items:
+            try:
+                archive_path = download_remote_archive(project_url, projects_dir)
+                projects.append(extract_local_archive(archive_path, projects_dir))
+            except RemoteArchiveDownloadError as e:
+                print(f"[SKIP] Failed to download remote archive {project_url}: {e}")
+            except Exception as e:
+                print(f"[SKIP] Failed to extract remote archive {project_url}: {e}")
     elif all_existing:
         print("No explicit inputs. Processing all existing projects in the specified directory.")
         extract_compressed_files(projects_dir)
@@ -203,7 +214,10 @@ def prepare_projects(
         if not projects:
             raise ValueError("No projects found. Check 'tex_sources_dir' and 'paper_list' in config.")
     else:
-        raise ValueError("No input provided. Use --arxiv or --project. To process existing projects, pass --all-existing.")
+        raise ValueError(
+            "No input provided. Use --arxiv, --project, or --project-url. "
+            "To process existing projects, pass --all-existing."
+        )
 
     projects = [os.path.abspath(p) for p in projects if isinstance(p, (str, os.PathLike))]
     projects = list(dict.fromkeys(projects))

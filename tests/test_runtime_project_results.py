@@ -150,6 +150,64 @@ target_language = "ch"
             all_existing=False,
         )
 
+    def test_prepare_projects_downloads_remote_archives(self):
+        from src.runtime import prepare_projects
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            source_dir = tmp_path / "tex-source"
+            output_dir = tmp_path / "outputs"
+            config = {
+                "paper_list": [],
+                "tex_sources_dir": str(source_dir),
+                "output_dir": str(output_dir),
+            }
+            downloaded_archive = source_dir / "paper.tar.gz"
+            extracted_project = source_dir / "paper"
+
+            with patch("src.runtime.download_remote_archive", return_value=str(downloaded_archive)) as download_mock:
+                with patch("src.runtime.extract_local_archive", return_value=str(extracted_project)) as extract_mock:
+                    projects, returned_config, projects_dir, returned_output_dir = prepare_projects(
+                        config=config,
+                        project_items=[],
+                        project_url_items=["https://example.test/paper.tar.gz"],
+                        all_existing=False,
+                    )
+
+        download_mock.assert_called_once_with("https://example.test/paper.tar.gz", str(source_dir))
+        extract_mock.assert_called_once_with(str(downloaded_archive), str(source_dir))
+        self.assertEqual(projects, [str(extracted_project.resolve())])
+        self.assertEqual(returned_config, config)
+        self.assertEqual(projects_dir, str(source_dir.resolve()))
+        self.assertEqual(returned_output_dir, str(output_dir.resolve()))
+
+    def test_prepare_projects_skips_failed_remote_archives(self):
+        from src.runtime import prepare_projects
+        from src.project_sources import RemoteArchiveDownloadError
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            config = {
+                "paper_list": [],
+                "tex_sources_dir": str(tmp_path / "tex-source"),
+                "output_dir": str(tmp_path / "outputs"),
+            }
+
+            with patch(
+                "src.runtime.download_remote_archive",
+                side_effect=RemoteArchiveDownloadError("Response is not a supported archive."),
+            ):
+                with self.assertRaisesRegex(ValueError, "No valid TeX projects available for processing."):
+                    with redirect_stdout(StringIO()) as stdout:
+                        prepare_projects(
+                            config=config,
+                            project_items=[],
+                            project_url_items=["https://example.test/download"],
+                            all_existing=False,
+                        )
+
+        self.assertIn("[SKIP] Failed to download remote archive https://example.test/download", stdout.getvalue())
+
     def test_cli_passes_runtime_config_overrides(self):
         import main
 
