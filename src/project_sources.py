@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Mapping
 from urllib.parse import urlparse
 
 import requests
+from requests.structures import CaseInsensitiveDict
 
 SUPPORTED_ARCHIVE_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz")
 
@@ -20,7 +22,7 @@ def _filename_from_content_disposition(value: str) -> str | None:
     return None
 
 
-def _guess_archive_name(url: str, headers: dict[str, str]) -> str:
+def _guess_archive_name(url: str, headers: Mapping[str, str]) -> str:
     disposition_name = _filename_from_content_disposition(
         headers.get("Content-Disposition", "")
     )
@@ -32,7 +34,7 @@ def _guess_archive_name(url: str, headers: dict[str, str]) -> str:
     return "downloaded-archive.zip"
 
 
-def _looks_like_supported_archive(url: str, headers: dict[str, str]) -> bool:
+def _looks_like_supported_archive(url: str, headers: Mapping[str, str]) -> bool:
     filename = _guess_archive_name(url, headers).lower()
     content_type = headers.get("Content-Type", "").lower()
     if filename.endswith(SUPPORTED_ARCHIVE_SUFFIXES):
@@ -57,10 +59,11 @@ def download_remote_archive(url: str, projects_dir: str) -> str:
     target_dir = Path(projects_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
 
+    destination: Path | None = None
     try:
         with requests.get(url, stream=True, timeout=30) as response:
             response.raise_for_status()
-            headers = dict(response.headers)
+            headers = CaseInsensitiveDict(response.headers)
             content_type = headers.get("Content-Type", "").lower()
             if "text/html" in content_type:
                 raise RemoteArchiveDownloadError(
@@ -85,6 +88,8 @@ def download_remote_archive(url: str, projects_dir: str) -> str:
                     if chunk:
                         handle.write(chunk)
     except requests.RequestException as exc:
+        if destination is not None and destination.exists():
+            destination.unlink()
         raise RemoteArchiveDownloadError(
             f"Failed to download remote archive: {exc}"
         ) from exc
