@@ -77,6 +77,8 @@ def main():
     )
     parser.add_argument("--output", type=str, default="", help="output directory.")
     parser.add_argument("--source", type=str, default="", help="tex source directory.")
+    parser.add_argument("--source_language", type=str, default="", help="Source language code.")
+    parser.add_argument("--target_language", type=str, default="", help="Target language code.")
     parser.add_argument(
         "--all-existing",
         action="store_true",
@@ -101,6 +103,8 @@ def main():
             "key": args.key,
             "source": args.source,
             "output": args.output,
+            "source_language": args.source_language,
+            "target_language": args.target_language,
             "retranslate_with_terms": args.retranslate_with_terms,
             "paper_list": arxiv_items,
         },

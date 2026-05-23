@@ -261,6 +261,14 @@ latextrans --all-existing
 latextrans --config config/default.toml --source "tex source" --output outputs --arxiv 2508.18791
 ```
 
+## 覆盖翻译语言
+
+```bash
+latextrans --arxiv 2508.18791 --source_language en --target_language ja
+```
+
+CLI 语言参数会覆盖配置文件中的 `source_language` 和 `target_language`。最终生效的 `target_language` 也会用于输出目录前缀，例如 `outputs/ja_2508.18791/`。
+
 ## 覆盖模型配置
 
 ```bash

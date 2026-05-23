@@ -261,6 +261,14 @@ When `--arxiv`, `--project`, or `--project-url` is provided, LaTeXTransPlus proc
 latextrans --config config/default.toml --source "tex source" --output outputs --arxiv 2508.18791
 ```
 
+## Override Translation Languages
+
+```bash
+latextrans --arxiv 2508.18791 --source_language en --target_language ja
+```
+
+CLI language options override `source_language` and `target_language` from the config file. The final `target_language` is also used in the output directory prefix, such as `outputs/ja_2508.18791/`.
+
 ## Override Model Settings
 
 ```bash

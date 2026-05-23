@@ -411,6 +411,8 @@ target_language = "ch"
                 "key": "test-key",
                 "source": "tex-source",
                 "output": "outputs",
+                "source_language": "",
+                "target_language": "",
                 "retranslate_with_terms": True,
                 "paper_list": ["2501.00001", "2501.00002"],
             },
