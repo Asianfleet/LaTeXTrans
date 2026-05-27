@@ -36,12 +36,15 @@ class JsonLinesEventSinkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "nested" / "events.jsonl"
             sink = JsonLinesEventSink(file_path=str(path))
-            sink.write({"type": "run_complete", "ok": True})
+            sink.write({"type": "run_complete", "project_name": "论文", "ok": True})
             sink.close()
 
-            payload = json.loads(path.read_text(encoding="utf-8").strip())
+            raw_text = path.read_text(encoding="utf-8").strip()
+            self.assertIn('"论文"', raw_text)
+            payload = json.loads(raw_text)
 
         self.assertEqual(payload["type"], "run_complete")
+        self.assertEqual(payload["project_name"], "论文")
         self.assertTrue(payload["ok"])
 
     def test_stdout_and_file_receive_same_event(self):
