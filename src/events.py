@@ -9,10 +9,16 @@ from pathlib import Path
 from typing import Any, TextIO
 
 SCHEMA_VERSION = 1
+_RESERVED_EVENT_KEYS = frozenset({"schema_version", "type", "timestamp"})
 
 
 def build_event(event_type: str, **payload: Any) -> dict[str, Any]:
     """构建带标准元数据的事件对象。"""
+
+    conflicting_keys = sorted(_RESERVED_EVENT_KEYS.intersection(payload))
+    if conflicting_keys:
+        conflict_text = ", ".join(conflicting_keys)
+        raise ValueError(f"payload 包含保留字段：{conflict_text}")
 
     timestamp = datetime.now().astimezone().isoformat(timespec="milliseconds")
     return {
@@ -38,6 +44,7 @@ class JsonLinesEventSink:
         self._stdout_enabled = stdout
         self._stdout_stream = stdout_stream if stdout_stream is not None else sys.stdout
         self._file_stream: TextIO | None = None
+        self._closed = False
 
         if file_path is not None:
             path = Path(file_path)
@@ -57,6 +64,9 @@ class JsonLinesEventSink:
     def write(self, event: dict[str, Any]) -> None:
         """将单个事件写为一行 JSON，并立即 flush。"""
 
+        if self._closed:
+            raise ValueError("event sink is closed")
+
         line = json.dumps(event, ensure_ascii=False) + "\n"
         if self._stdout_enabled:
             self._stdout_stream.write(line)
@@ -68,6 +78,10 @@ class JsonLinesEventSink:
     def close(self) -> None:
         """关闭文件输出目标。"""
 
+        if self._closed:
+            return
+
+        self._closed = True
         if self._file_stream is not None:
             self._file_stream.close()
             self._file_stream = None

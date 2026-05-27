@@ -17,6 +17,17 @@ class EventBuilderTests(unittest.TestCase):
         self.assertIn("T", event["timestamp"])
         self.assertRegex(event["timestamp"], r"(Z|[+-]\d\d:\d\d)$")
 
+    def test_build_event_rejects_reserved_payload_keys(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            r"schema_version.*timestamp|timestamp.*schema_version",
+        ):
+            build_event(
+                "project_start",
+                schema_version=2,
+                timestamp="2026-01-01T00:00:00+08:00",
+            )
+
 
 class JsonLinesEventSinkTests(unittest.TestCase):
     def test_stdout_sink_writes_one_json_object_per_line(self):
@@ -61,6 +72,24 @@ class JsonLinesEventSinkTests(unittest.TestCase):
 
         self.assertEqual(stdout_payload, file_payload)
         self.assertEqual(file_payload["pdf_path"], r"D:\paper.pdf")
+
+    def test_write_after_close_raises_value_error_and_does_not_write_stdout(self):
+        stdout = StringIO()
+        sink = JsonLinesEventSink(stdout=True, stdout_stream=stdout)
+        sink.close()
+
+        with self.assertRaisesRegex(ValueError, "closed"):
+            sink.write({"type": "project_start"})
+
+        self.assertEqual(stdout.getvalue(), "")
+
+    def test_write_after_context_manager_exit_raises_value_error(self):
+        stdout = StringIO()
+        with JsonLinesEventSink(stdout=True, stdout_stream=stdout) as sink:
+            sink.write({"type": "project_start"})
+
+        with self.assertRaisesRegex(ValueError, "closed"):
+            sink.write({"type": "project_complete"})
 
 
 if __name__ == "__main__":
