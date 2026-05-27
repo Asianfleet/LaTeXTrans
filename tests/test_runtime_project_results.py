@@ -150,6 +150,127 @@ target_language = "ch"
             all_existing=False,
         )
 
+    def test_cli_json_events_stdout_contains_only_json_lines(self):
+        import json
+        import main
+
+        runtime_config = {
+            "target_language": "ch",
+            "source_language": "en",
+            "paper_list": [],
+        }
+        events_seen = []
+
+        def fake_run_projects(**kwargs):
+            kwargs["event_callback"](
+                {
+                    "type": "project_start",
+                    "index": 1,
+                    "total": 1,
+                    "project_name": "paper",
+                    "project_dir": r"D:\paper",
+                    "output_dir": r"D:\outputs\ch_paper",
+                    "log_path": r"D:\outputs\ch_paper\latextrans.log",
+                }
+            )
+            kwargs["event_callback"](
+                {
+                    "type": "project_complete",
+                    "index": 1,
+                    "total": 1,
+                    "project_name": "paper",
+                    "project_dir": r"D:\paper",
+                    "output_dir": r"D:\outputs\ch_paper",
+                    "pdf_path": r"D:\outputs\ch_paper\ch_paper.pdf",
+                    "errors_report_path": r"D:\outputs\ch_paper\errors_report.json",
+                    "validation_summary": {"warnings": 0, "errors": 0, "total": 0},
+                    "error": None,
+                    "log_path": r"D:\outputs\ch_paper\latextrans.log",
+                }
+            )
+            events_seen.append(kwargs["event_callback"])
+            return {"completed_projects": [{"project_name": "paper"}], "failed_projects": []}
+
+        argv = [
+            "latextrans",
+            "--config",
+            "config/test.toml",
+            "--project",
+            r"D:\paper",
+            "--json-events",
+            "stdout",
+        ]
+
+        with patch.object(main.sys, "argv", argv):
+            with patch("src.runtime.load_runtime_config", return_value=runtime_config):
+                with patch("src.runtime.prepare_projects", return_value=([r"D:\paper"], runtime_config, "tex-source", r"D:\outputs")):
+                    with patch("src.runtime.run_projects", side_effect=fake_run_projects):
+                        with redirect_stdout(StringIO()) as stdout:
+                            main.main()
+
+        lines = stdout.getvalue().splitlines()
+        self.assertEqual([json.loads(line)["type"] for line in lines], [
+            "run_start",
+            "project_start",
+            "project_complete",
+            "run_complete",
+        ])
+        for line in lines:
+            payload = json.loads(line)
+            self.assertEqual(payload["schema_version"], 1)
+            self.assertIn("timestamp", payload)
+        self.assertNotIn("Console log will be saved to", stdout.getvalue())
+
+    def test_cli_json_events_file_writes_events(self):
+        import json
+        import main
+
+        runtime_config = {"target_language": "ch", "source_language": "en", "paper_list": []}
+
+        def fake_run_projects(**kwargs):
+            kwargs["event_callback"](
+                {
+                    "type": "project_error",
+                    "index": 1,
+                    "total": 1,
+                    "project_name": "paper",
+                    "project_dir": r"D:\paper",
+                    "output_dir": r"D:\outputs\ch_paper",
+                    "pdf_path": None,
+                    "errors_report_path": None,
+                    "validation_summary": None,
+                    "error": "boom",
+                    "log_path": r"D:\outputs\ch_paper\latextrans.log",
+                }
+            )
+            return {"completed_projects": [], "failed_projects": [{"project_name": "paper"}]}
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            events_path = Path(tmp_dir) / "events.jsonl"
+            argv = [
+                "latextrans",
+                "--config",
+                "config/test.toml",
+                "--project",
+                r"D:\paper",
+                "--json-events-file",
+                str(events_path),
+            ]
+
+            with patch.object(main.sys, "argv", argv):
+                with patch("src.runtime.load_runtime_config", return_value=runtime_config):
+                    with patch("src.runtime.prepare_projects", return_value=([r"D:\paper"], runtime_config, "tex-source", r"D:\outputs")):
+                        with patch("src.runtime.run_projects", side_effect=fake_run_projects):
+                            with self.assertRaises(SystemExit):
+                                with redirect_stdout(StringIO()):
+                                    main.main()
+
+            events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual([event["type"] for event in events], ["run_start", "project_error", "run_complete"])
+        self.assertFalse(events[-1]["ok"])
+        self.assertEqual(events[-1]["failed"], 1)
+
     def test_prepare_projects_downloads_remote_archives(self):
         from src.runtime import prepare_projects
 

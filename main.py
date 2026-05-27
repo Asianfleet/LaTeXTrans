@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterator, Optional, TextIO
 
 from src import runtime
+from src.events import JsonLinesEventSink, build_event
 from src.formats.latex.prompts import *
 from src.runtime import should_exit_with_failure
 
@@ -100,6 +101,18 @@ def main():
         default=None,
         help="Reuse an existing parsed output directory and project_terms.csv, then fully retranslate.",
     )
+    parser.add_argument(
+        "--json-events",
+        choices=["stdout"],
+        default="",
+        help="Emit JSON Lines events to the selected destination.",
+    )
+    parser.add_argument(
+        "--json-events-file",
+        type=str,
+        default="",
+        help="Write JSON Lines events to this file.",
+    )
 
     args = parser.parse_args()
     arxiv_items = runtime.split_cli_items(args.arxiv)
@@ -126,22 +139,62 @@ def main():
         all_existing=args.all_existing,
     )
     target_language = config.get("target_language", "ch")
+    source_language = config.get("source_language", "")
+    emit_json_stdout = args.json_events == "stdout"
+    event_sink = JsonLinesEventSink(
+        stdout=emit_json_stdout,
+        file_path=args.json_events_file or None,
+    )
 
     @contextmanager
     def project_log_context(idx: int, total: int, project_dir: str) -> Iterator[None]:
         log_path = _project_log_path(output_dir, target_language, project_dir)
-        with _tee_console_to_log(log_path):
+        console_context = (
+            _redirect_console_to_log(log_path)
+            if emit_json_stdout
+            else _tee_console_to_log(log_path)
+        )
+        with console_context:
             print(f"Console log will be saved to: {log_path}")
             yield
 
-    project_status = runtime.run_projects(
-        config=config,
-        projects=projects,
-        output_dir=output_dir,
-        project_context=project_log_context,
-    )
+    project_status = None
+    try:
+        event_sink.write(
+            build_event(
+                "run_start",
+                total=len(projects),
+                config_path=args.config,
+                output_dir=output_dir,
+                source_language=source_language,
+                target_language=target_language,
+            )
+        )
+        project_status = runtime.run_projects(
+            config=config,
+            projects=projects,
+            output_dir=output_dir,
+            event_callback=lambda event: event_sink.write(
+                build_event(
+                    event["type"],
+                    **{key: value for key, value in event.items() if key != "type"},
+                )
+            ),
+            project_context=project_log_context,
+        )
+        event_sink.write(
+            build_event(
+                "run_complete",
+                ok=not should_exit_with_failure(project_status),
+                total=len(projects),
+                completed=len(project_status.get("completed_projects", [])),
+                failed=len(project_status.get("failed_projects", [])),
+            )
+        )
+    finally:
+        event_sink.close()
 
-    if should_exit_with_failure(project_status):
+    if project_status is not None and should_exit_with_failure(project_status):
         sys.exit(1)
 
 
