@@ -185,6 +185,28 @@ The validator checks command counts, placeholder preservation, and bracket balan
 latextrans --arxiv 2508.18791
 ```
 
+## Emit JSON Lines Events
+
+For integrations such as Zotero plugins, LaTeXTransPlus can emit stable project-level JSON Lines events:
+
+```bash
+latextrans --arxiv 2508.18791 --json-events stdout
+latextrans --arxiv 2508.18791 --json-events-file outputs/events.jsonl
+latextrans --arxiv 2508.18791 --json-events stdout --json-events-file outputs/events.jsonl
+```
+
+When `--json-events stdout` is enabled, stdout contains only JSON objects, one per line. Human-readable workflow logs are still written to each project's `latextrans.log`.
+
+The first schema version emits these event types:
+
+- `run_start`
+- `project_start`
+- `project_complete`
+- `project_error`
+- `run_complete`
+
+Each event includes `schema_version`, `type`, and `timestamp`. Project events also include `project_name`, `project_dir`, `output_dir`, and `log_path`; completion and error events include `pdf_path`, `errors_report_path`, `validation_summary`, and `error`.
+
 Versioned arXiv IDs are supported:
 
 ```bash
