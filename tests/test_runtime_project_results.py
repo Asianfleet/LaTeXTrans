@@ -587,6 +587,70 @@ target_language = "ch"
             r"outputs\ch_paper\project_terms_decisions.json",
         )
 
+    def test_run_projects_event_payload_includes_output_and_log_paths(self):
+        events = []
+
+        class FakeCoordinatorAgent:
+            def __init__(self, config, project_dir, output_dir):
+                pass
+
+            def workflow_latextrans(self):
+                return {
+                    "ok": True,
+                    "pdf_path": r"outputs\ch_paper\ch_paper.pdf",
+                    "errors_report_path": r"outputs\ch_paper\errors_report.json",
+                    "validation_summary": {"warnings": 0, "errors": 0, "total": 0},
+                    "error": None,
+                }
+
+        with patch("src.runtime.CoordinatorAgent", FakeCoordinatorAgent):
+            with redirect_stdout(StringIO()):
+                run_projects(
+                    config={"target_language": "ch"},
+                    projects=[r"D:\tex source\paper"],
+                    output_dir=r"D:\repo\outputs",
+                    event_callback=events.append,
+                )
+
+        start_event = events[0]
+        complete_event = events[1]
+        self.assertEqual(start_event["type"], "project_start")
+        self.assertEqual(start_event["output_dir"], r"D:\repo\outputs\ch_paper")
+        self.assertEqual(start_event["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
+        self.assertEqual(complete_event["type"], "project_complete")
+        self.assertEqual(complete_event["output_dir"], r"D:\repo\outputs\ch_paper")
+        self.assertEqual(complete_event["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
+        self.assertEqual(complete_event["pdf_path"], r"outputs\ch_paper\ch_paper.pdf")
+        self.assertIsNone(complete_event["error"])
+
+    def test_run_projects_exception_event_includes_paths_and_null_result_fields(self):
+        events = []
+
+        class FailingCoordinatorAgent:
+            def __init__(self, config, project_dir, output_dir):
+                pass
+
+            def workflow_latextrans(self):
+                raise RuntimeError("boom")
+
+        with patch("src.runtime.CoordinatorAgent", FailingCoordinatorAgent):
+            with redirect_stdout(StringIO()):
+                run_projects(
+                    config={"target_language": "ch"},
+                    projects=[r"D:\tex source\paper"],
+                    output_dir=r"D:\repo\outputs",
+                    event_callback=events.append,
+                )
+
+        error_event = events[1]
+        self.assertEqual(error_event["type"], "project_error")
+        self.assertEqual(error_event["output_dir"], r"D:\repo\outputs\ch_paper")
+        self.assertEqual(error_event["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
+        self.assertIsNone(error_event["pdf_path"])
+        self.assertIsNone(error_event["errors_report_path"])
+        self.assertIsNone(error_event["validation_summary"])
+        self.assertEqual(error_event["error"], "boom")
+
 
 if __name__ == "__main__":
     unittest.main()
