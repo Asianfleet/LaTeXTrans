@@ -271,6 +271,73 @@ target_language = "ch"
         self.assertFalse(events[-1]["ok"])
         self.assertEqual(events[-1]["failed"], 1)
 
+    def test_cli_json_events_stdout_redirects_prepare_logs_away_from_stdout(self):
+        import json
+        import main
+
+        runtime_config = {"target_language": "ch", "source_language": "en", "paper_list": []}
+
+        def fake_prepare_projects(**kwargs):
+            print("prepare noisy log")
+            return [r"D:\paper"], runtime_config, "tex-source", r"D:\outputs"
+
+        argv = [
+            "latextrans",
+            "--config",
+            "config/test.toml",
+            "--project",
+            r"D:\paper",
+            "--json-events",
+            "stdout",
+        ]
+
+        with patch.object(main.sys, "argv", argv):
+            with patch("src.runtime.load_runtime_config", return_value=runtime_config):
+                with patch("src.runtime.prepare_projects", side_effect=fake_prepare_projects):
+                    with patch(
+                        "src.runtime.run_projects",
+                        return_value={"completed_projects": [{"project_name": "paper"}], "failed_projects": []},
+                    ):
+                        with redirect_stdout(StringIO()) as stdout:
+                            main.main()
+
+        lines = stdout.getvalue().splitlines()
+        event_types = [json.loads(line)["type"] for line in lines]
+        self.assertEqual(event_types, ["run_start", "run_complete"])
+        self.assertNotIn("prepare noisy log", stdout.getvalue())
+
+    def test_cli_json_events_stdout_writes_run_complete_when_run_projects_raises(self):
+        import json
+        import main
+
+        runtime_config = {"target_language": "ch", "source_language": "en", "paper_list": []}
+        argv = [
+            "latextrans",
+            "--config",
+            "config/test.toml",
+            "--project",
+            r"D:\paper",
+            "--json-events",
+            "stdout",
+        ]
+
+        with patch.object(main.sys, "argv", argv):
+            with patch("src.runtime.load_runtime_config", return_value=runtime_config):
+                with patch(
+                    "src.runtime.prepare_projects",
+                    return_value=([r"D:\paper"], runtime_config, "tex-source", r"D:\outputs"),
+                ):
+                    with patch("src.runtime.run_projects", side_effect=RuntimeError("boom")):
+                        with self.assertRaises(RuntimeError):
+                            with redirect_stdout(StringIO()) as stdout:
+                                main.main()
+
+        events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual([event["type"] for event in events], ["run_start", "run_complete"])
+        self.assertFalse(events[-1]["ok"])
+        self.assertEqual(events[-1]["failed"], 1)
+        self.assertEqual(events[-1]["error"], "boom")
+
     def test_prepare_projects_downloads_remote_archives(self):
         from src.runtime import prepare_projects
 

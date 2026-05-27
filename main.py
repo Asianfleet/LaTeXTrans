@@ -63,6 +63,16 @@ def _project_log_path(output_dir: str, target_language: str, project_dir: str) -
     return _project_output_dir(output_dir, target_language, project_dir) / "latextrans.log"
 
 
+@contextmanager
+def _redirect_stdout_to_stderr(enabled: bool) -> Iterator[None]:
+    """在 JSON stdout 模式下，将普通 stdout 日志改写到 stderr。"""
+    if enabled:
+        with redirect_stdout(sys.stderr):
+            yield
+        return
+    yield
+
+
 def main():
     """
     Main function to run the LaTeXTrans application.
@@ -115,6 +125,7 @@ def main():
     )
 
     args = parser.parse_args()
+    emit_json_stdout = args.json_events == "stdout"
     arxiv_items = runtime.split_cli_items(args.arxiv)
     project_items = runtime.split_cli_items(args.project)
     project_url_items = runtime.split_cli_items(args.project_url)
@@ -132,15 +143,15 @@ def main():
             "paper_list": arxiv_items,
         },
     )
-    projects, config, _projects_dir, output_dir = runtime.prepare_projects(
-        config=config,
-        project_items=project_items,
-        project_url_items=project_url_items,
-        all_existing=args.all_existing,
-    )
+    with _redirect_stdout_to_stderr(emit_json_stdout):
+        projects, config, _projects_dir, output_dir = runtime.prepare_projects(
+            config=config,
+            project_items=project_items,
+            project_url_items=project_url_items,
+            all_existing=args.all_existing,
+        )
     target_language = config.get("target_language", "ch")
     source_language = config.get("source_language", "")
-    emit_json_stdout = args.json_events == "stdout"
     event_sink = JsonLinesEventSink(
         stdout=emit_json_stdout,
         file_path=args.json_events_file or None,
@@ -170,18 +181,39 @@ def main():
                 target_language=target_language,
             )
         )
-        project_status = runtime.run_projects(
-            config=config,
-            projects=projects,
-            output_dir=output_dir,
-            event_callback=lambda event: event_sink.write(
-                build_event(
-                    event["type"],
-                    **{key: value for key, value in event.items() if key != "type"},
+        try:
+            project_status = runtime.run_projects(
+                config=config,
+                projects=projects,
+                output_dir=output_dir,
+                event_callback=lambda event: event_sink.write(
+                    build_event(
+                        event["type"],
+                        **{key: value for key, value in event.items() if key != "type"},
+                    )
+                ),
+                project_context=project_log_context,
+            )
+        except Exception as exc:
+            completed_count = 0
+            failed_count = len(projects)
+            if project_status is not None:
+                completed_count = len(project_status.get("completed_projects", []))
+                failed_count = max(
+                    len(project_status.get("failed_projects", [])),
+                    len(projects) - completed_count,
                 )
-            ),
-            project_context=project_log_context,
-        )
+            event_sink.write(
+                build_event(
+                    "run_complete",
+                    ok=False,
+                    total=len(projects),
+                    completed=completed_count,
+                    failed=failed_count,
+                    error=str(exc),
+                )
+            )
+            raise
         event_sink.write(
             build_event(
                 "run_complete",
