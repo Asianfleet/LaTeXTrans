@@ -49,7 +49,7 @@ class JsonLinesEventSink:
         if file_path is not None:
             path = Path(file_path)
             path.parent.mkdir(parents=True, exist_ok=True)
-            self._file_stream = path.open("a", encoding="utf-8", buffering=1)
+            self._file_stream = path.open("w", encoding="utf-8", buffering=1)
 
     def __enter__(self) -> "JsonLinesEventSink":
         """进入上下文管理器。"""

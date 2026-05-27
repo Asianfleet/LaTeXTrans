@@ -250,6 +250,8 @@ def classify_project_result(
     project_name: str,
     project_dir: str,
     workflow_result: Dict[str, Any],
+    output_dir: Optional[str] = None,
+    log_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     ok = workflow_result.get("ok", False)
     result = {
@@ -267,6 +269,10 @@ def classify_project_result(
         ),
         "error": workflow_result.get("error"),
     }
+    if output_dir is not None:
+        result["output_dir"] = output_dir
+    if log_path is not None:
+        result["log_path"] = log_path
     for key in ("status", "project_terms_path", "project_terms_decisions_path"):
         if key in workflow_result:
             result[key] = workflow_result[key]
@@ -324,6 +330,8 @@ def run_projects(
                     project_name=project_name,
                     project_dir=project_dir,
                     workflow_result=workflow_result,
+                    output_dir=project_output_path,
+                    log_path=log_path,
                 )
             except Exception as e:
                 print(f"Error processing project {project_name}: {e}")

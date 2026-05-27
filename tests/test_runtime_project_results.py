@@ -710,6 +710,38 @@ target_language = "ch"
         self.assertEqual(status["failed_projects"][0]["project_name"], "first")
         self.assertEqual(status["completed_projects"][0]["project_name"], "second")
 
+    def test_run_projects_failure_status_includes_output_and_log_paths(self):
+        class FakeCoordinatorAgent:
+            def __init__(self, config, project_dir, output_dir):
+                pass
+
+            def workflow_latextrans(self):
+                return {
+                    "ok": False,
+                    "pdf_path": None,
+                    "errors_report_path": None,
+                    "validation_summary": {"warnings": 1, "errors": 1, "total": 2},
+                    "error": "validation failed",
+                }
+
+        with patch("src.runtime.CoordinatorAgent", FakeCoordinatorAgent):
+            with redirect_stdout(StringIO()):
+                status = run_projects(
+                    config={"target_language": "ch"},
+                    projects=[r"D:\tex source\paper"],
+                    output_dir=r"D:\repo\outputs",
+                )
+
+        failure = status["failed_projects"][0]
+        self.assertEqual(failure["type"], "failed")
+        self.assertFalse(failure["ok"])
+        self.assertEqual(failure["output_dir"], r"D:\repo\outputs\ch_paper")
+        self.assertEqual(failure["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
+        self.assertIsNone(failure["pdf_path"])
+        self.assertIsNone(failure["errors_report_path"])
+        self.assertEqual(failure["validation_summary"], {"warnings": 1, "errors": 1, "total": 2})
+        self.assertEqual(failure["error"], "validation failed")
+
     def test_run_projects_uses_retranslation_workflow_when_requested(self):
         calls = []
 

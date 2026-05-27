@@ -58,6 +58,19 @@ class JsonLinesEventSinkTests(unittest.TestCase):
         self.assertEqual(payload["project_name"], "论文")
         self.assertTrue(payload["ok"])
 
+    def test_file_sink_overwrites_existing_jsonl_file(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "events.jsonl"
+            path.write_text('{"type": "old"}\n', encoding="utf-8")
+
+            sink = JsonLinesEventSink(file_path=str(path))
+            sink.write({"type": "run_start"})
+            sink.close()
+
+            events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual(events, [{"type": "run_start"}])
+
     def test_stdout_and_file_receive_same_event(self):
         stdout = StringIO()
         with tempfile.TemporaryDirectory() as tmp_dir:
