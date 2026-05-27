@@ -44,6 +44,16 @@ def _tee_console_to_log(
                 yield log_path
 
 
+@contextmanager
+def _redirect_console_to_log(log_path: Path) -> Iterator[Path]:
+    """将 stdout 和 stderr 都重定向到项目日志文件。"""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", encoding="utf-8", buffering=1) as log_file:
+        with redirect_stdout(log_file):
+            with redirect_stderr(log_file):
+                yield log_path
+
+
 def _project_output_dir(output_dir: str, target_language: str, project_dir: str) -> Path:
     return Path(output_dir) / f"{target_language}_{Path(project_dir).name}"
 
