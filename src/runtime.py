@@ -327,33 +327,25 @@ def run_projects(
                 )
             except Exception as e:
                 print(f"Error processing project {project_name}: {e}")
-                failed_projects.append(
-                    {
-                        "type": "failed",
-                        "ok": False,
-                        "index": idx,
-                        "total": total_projects,
-                        "project_name": project_name,
-                        "project_dir": project_dir,
-                        "error": str(e),
-                    }
-                )
+                failure_result = {
+                    "type": "failed",
+                    "ok": False,
+                    "index": idx,
+                    "total": total_projects,
+                    "project_name": project_name,
+                    "project_dir": project_dir,
+                    "output_dir": project_output_path,
+                    "pdf_path": None,
+                    "errors_report_path": None,
+                    "validation_summary": None,
+                    "error": str(e),
+                    "log_path": log_path,
+                }
+                failed_projects.append(failure_result)
                 if event_callback:
-                    event_callback(
-                        {
-                            "type": "project_error",
-                            "index": idx,
-                        "total": total_projects,
-                        "project_name": project_name,
-                        "project_dir": project_dir,
-                        "output_dir": project_output_path,
-                        "pdf_path": None,
-                        "errors_report_path": None,
-                        "validation_summary": None,
-                        "error": str(e),
-                        "log_path": log_path,
-                    }
-                )
+                    event_payload = dict(failure_result)
+                    event_payload["type"] = "project_error"
+                    event_callback(event_payload)
                 continue
 
             if project_result["ok"]:

@@ -651,6 +651,36 @@ target_language = "ch"
         self.assertIsNone(error_event["validation_summary"])
         self.assertEqual(error_event["error"], "boom")
 
+    def test_run_projects_exception_status_includes_paths_and_null_result_fields(self):
+        class FailingCoordinatorAgent:
+            def __init__(self, config, project_dir, output_dir):
+                pass
+
+            def workflow_latextrans(self):
+                raise RuntimeError("boom")
+
+        with patch("src.runtime.CoordinatorAgent", FailingCoordinatorAgent):
+            with redirect_stdout(StringIO()):
+                status = run_projects(
+                    config={"target_language": "ch"},
+                    projects=[r"D:\tex source\paper"],
+                    output_dir=r"D:\repo\outputs",
+                )
+
+        failed_result = status["failed_projects"][0]
+        self.assertEqual(failed_result["type"], "failed")
+        self.assertFalse(failed_result["ok"])
+        self.assertEqual(failed_result["index"], 1)
+        self.assertEqual(failed_result["total"], 1)
+        self.assertEqual(failed_result["project_name"], "paper")
+        self.assertEqual(failed_result["project_dir"], r"D:\tex source\paper")
+        self.assertEqual(failed_result["output_dir"], r"D:\repo\outputs\ch_paper")
+        self.assertEqual(failed_result["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
+        self.assertIsNone(failed_result["pdf_path"])
+        self.assertIsNone(failed_result["errors_report_path"])
+        self.assertIsNone(failed_result["validation_summary"])
+        self.assertEqual(failed_result["error"], "boom")
+
 
 if __name__ == "__main__":
     unittest.main()
