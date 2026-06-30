@@ -23,6 +23,16 @@ ProjectEventCallback = Callable[[Dict[str, Any]], None]
 ProjectContextCallback = Callable[[int, int, str], ContextManager[None]]
 
 
+def project_output_dir(output_dir: str, target_language: str, project_dir: str) -> Path:
+    """返回单个项目的翻译输出目录。"""
+    return Path(output_dir) / f"{target_language}_{Path(project_dir).name}"
+
+
+def project_log_path(output_dir: str, target_language: str, project_dir: str) -> Path:
+    """返回单个项目的 CLI 日志路径。"""
+    return project_output_dir(output_dir, target_language, project_dir) / "latextrans.log"
+
+
 def resolve_path(path_value: str) -> Path:
     p = Path(path_value)
     if p.is_absolute():
@@ -240,6 +250,8 @@ def classify_project_result(
     project_name: str,
     project_dir: str,
     workflow_result: Dict[str, Any],
+    output_dir: Optional[str] = None,
+    log_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     ok = workflow_result.get("ok", False)
     result = {
@@ -257,6 +269,10 @@ def classify_project_result(
         ),
         "error": workflow_result.get("error"),
     }
+    if output_dir is not None:
+        result["output_dir"] = output_dir
+    if log_path is not None:
+        result["log_path"] = log_path
     for key in ("status", "project_terms_path", "project_terms_decisions_path"):
         if key in workflow_result:
             result[key] = workflow_result[key]
@@ -281,6 +297,9 @@ def run_projects(
         context = project_context(idx, total_projects, project_dir) if project_context else nullcontext()
         with context:
             project_name = os.path.basename(project_dir)
+            target_language = config.get("target_language", "ch")
+            project_output_path = str(project_output_dir(output_dir, target_language, project_dir))
+            log_path = str(project_log_path(output_dir, target_language, project_dir))
             print(f"[{idx}/{total_projects}] Processing {project_name}")
             if event_callback:
                 event_callback(
@@ -290,6 +309,8 @@ def run_projects(
                         "total": total_projects,
                         "project_name": project_name,
                         "project_dir": project_dir,
+                        "output_dir": project_output_path,
+                        "log_path": log_path,
                     }
                 )
 
@@ -309,31 +330,30 @@ def run_projects(
                     project_name=project_name,
                     project_dir=project_dir,
                     workflow_result=workflow_result,
+                    output_dir=project_output_path,
+                    log_path=log_path,
                 )
             except Exception as e:
                 print(f"Error processing project {project_name}: {e}")
-                failed_projects.append(
-                    {
-                        "type": "failed",
-                        "ok": False,
-                        "index": idx,
-                        "total": total_projects,
-                        "project_name": project_name,
-                        "project_dir": project_dir,
-                        "error": str(e),
-                    }
-                )
+                failure_result = {
+                    "type": "failed",
+                    "ok": False,
+                    "index": idx,
+                    "total": total_projects,
+                    "project_name": project_name,
+                    "project_dir": project_dir,
+                    "output_dir": project_output_path,
+                    "pdf_path": None,
+                    "errors_report_path": None,
+                    "validation_summary": None,
+                    "error": str(e),
+                    "log_path": log_path,
+                }
+                failed_projects.append(failure_result)
                 if event_callback:
-                    event_callback(
-                        {
-                            "type": "project_error",
-                            "index": idx,
-                            "total": total_projects,
-                            "project_name": project_name,
-                            "project_dir": project_dir,
-                            "error": str(e),
-                        }
-                    )
+                    event_payload = dict(failure_result)
+                    event_payload["type"] = "project_error"
+                    event_callback(event_payload)
                 continue
 
             if project_result["ok"]:
@@ -350,10 +370,12 @@ def run_projects(
                     "total": total_projects,
                     "project_name": project_name,
                     "project_dir": project_dir,
+                    "output_dir": project_output_path,
                     "pdf_path": project_result.get("pdf_path"),
                     "errors_report_path": project_result.get("errors_report_path"),
                     "validation_summary": project_result.get("validation_summary"),
                     "error": project_result.get("error"),
+                    "log_path": log_path,
                 }
                 for key in ("status", "project_terms_path", "project_terms_decisions_path"):
                     if key in project_result:

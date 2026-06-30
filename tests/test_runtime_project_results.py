@@ -150,6 +150,194 @@ target_language = "ch"
             all_existing=False,
         )
 
+    def test_cli_json_events_stdout_contains_only_json_lines(self):
+        import json
+        import main
+
+        runtime_config = {
+            "target_language": "ch",
+            "source_language": "en",
+            "paper_list": [],
+        }
+        events_seen = []
+
+        def fake_run_projects(**kwargs):
+            kwargs["event_callback"](
+                {
+                    "type": "project_start",
+                    "index": 1,
+                    "total": 1,
+                    "project_name": "paper",
+                    "project_dir": r"D:\paper",
+                    "output_dir": r"D:\outputs\ch_paper",
+                    "log_path": r"D:\outputs\ch_paper\latextrans.log",
+                }
+            )
+            kwargs["event_callback"](
+                {
+                    "type": "project_complete",
+                    "index": 1,
+                    "total": 1,
+                    "project_name": "paper",
+                    "project_dir": r"D:\paper",
+                    "output_dir": r"D:\outputs\ch_paper",
+                    "pdf_path": r"D:\outputs\ch_paper\ch_paper.pdf",
+                    "errors_report_path": r"D:\outputs\ch_paper\errors_report.json",
+                    "validation_summary": {"warnings": 0, "errors": 0, "total": 0},
+                    "error": None,
+                    "log_path": r"D:\outputs\ch_paper\latextrans.log",
+                }
+            )
+            events_seen.append(kwargs["event_callback"])
+            return {"completed_projects": [{"project_name": "paper"}], "failed_projects": []}
+
+        argv = [
+            "latextrans",
+            "--config",
+            "config/test.toml",
+            "--project",
+            r"D:\paper",
+            "--json-events",
+            "stdout",
+        ]
+
+        with patch.object(main.sys, "argv", argv):
+            with patch("src.runtime.load_runtime_config", return_value=runtime_config):
+                with patch("src.runtime.prepare_projects", return_value=([r"D:\paper"], runtime_config, "tex-source", r"D:\outputs")):
+                    with patch("src.runtime.run_projects", side_effect=fake_run_projects):
+                        with redirect_stdout(StringIO()) as stdout:
+                            main.main()
+
+        lines = stdout.getvalue().splitlines()
+        self.assertEqual([json.loads(line)["type"] for line in lines], [
+            "run_start",
+            "project_start",
+            "project_complete",
+            "run_complete",
+        ])
+        for line in lines:
+            payload = json.loads(line)
+            self.assertEqual(payload["schema_version"], 1)
+            self.assertIn("timestamp", payload)
+        self.assertNotIn("Console log will be saved to", stdout.getvalue())
+
+    def test_cli_json_events_file_writes_events(self):
+        import json
+        import main
+
+        runtime_config = {"target_language": "ch", "source_language": "en", "paper_list": []}
+
+        def fake_run_projects(**kwargs):
+            kwargs["event_callback"](
+                {
+                    "type": "project_error",
+                    "index": 1,
+                    "total": 1,
+                    "project_name": "paper",
+                    "project_dir": r"D:\paper",
+                    "output_dir": r"D:\outputs\ch_paper",
+                    "pdf_path": None,
+                    "errors_report_path": None,
+                    "validation_summary": None,
+                    "error": "boom",
+                    "log_path": r"D:\outputs\ch_paper\latextrans.log",
+                }
+            )
+            return {"completed_projects": [], "failed_projects": [{"project_name": "paper"}]}
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            events_path = Path(tmp_dir) / "events.jsonl"
+            argv = [
+                "latextrans",
+                "--config",
+                "config/test.toml",
+                "--project",
+                r"D:\paper",
+                "--json-events-file",
+                str(events_path),
+            ]
+
+            with patch.object(main.sys, "argv", argv):
+                with patch("src.runtime.load_runtime_config", return_value=runtime_config):
+                    with patch("src.runtime.prepare_projects", return_value=([r"D:\paper"], runtime_config, "tex-source", r"D:\outputs")):
+                        with patch("src.runtime.run_projects", side_effect=fake_run_projects):
+                            with self.assertRaises(SystemExit):
+                                with redirect_stdout(StringIO()):
+                                    main.main()
+
+            events = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual([event["type"] for event in events], ["run_start", "project_error", "run_complete"])
+        self.assertFalse(events[-1]["ok"])
+        self.assertEqual(events[-1]["failed"], 1)
+
+    def test_cli_json_events_stdout_redirects_prepare_logs_away_from_stdout(self):
+        import json
+        import main
+
+        runtime_config = {"target_language": "ch", "source_language": "en", "paper_list": []}
+
+        def fake_prepare_projects(**kwargs):
+            print("prepare noisy log")
+            return [r"D:\paper"], runtime_config, "tex-source", r"D:\outputs"
+
+        argv = [
+            "latextrans",
+            "--config",
+            "config/test.toml",
+            "--project",
+            r"D:\paper",
+            "--json-events",
+            "stdout",
+        ]
+
+        with patch.object(main.sys, "argv", argv):
+            with patch("src.runtime.load_runtime_config", return_value=runtime_config):
+                with patch("src.runtime.prepare_projects", side_effect=fake_prepare_projects):
+                    with patch(
+                        "src.runtime.run_projects",
+                        return_value={"completed_projects": [{"project_name": "paper"}], "failed_projects": []},
+                    ):
+                        with redirect_stdout(StringIO()) as stdout:
+                            main.main()
+
+        lines = stdout.getvalue().splitlines()
+        event_types = [json.loads(line)["type"] for line in lines]
+        self.assertEqual(event_types, ["run_start", "run_complete"])
+        self.assertNotIn("prepare noisy log", stdout.getvalue())
+
+    def test_cli_json_events_stdout_writes_run_complete_when_run_projects_raises(self):
+        import json
+        import main
+
+        runtime_config = {"target_language": "ch", "source_language": "en", "paper_list": []}
+        argv = [
+            "latextrans",
+            "--config",
+            "config/test.toml",
+            "--project",
+            r"D:\paper",
+            "--json-events",
+            "stdout",
+        ]
+
+        with patch.object(main.sys, "argv", argv):
+            with patch("src.runtime.load_runtime_config", return_value=runtime_config):
+                with patch(
+                    "src.runtime.prepare_projects",
+                    return_value=([r"D:\paper"], runtime_config, "tex-source", r"D:\outputs"),
+                ):
+                    with patch("src.runtime.run_projects", side_effect=RuntimeError("boom")):
+                        with self.assertRaises(RuntimeError):
+                            with redirect_stdout(StringIO()) as stdout:
+                                main.main()
+
+        events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertEqual([event["type"] for event in events], ["run_start", "run_complete"])
+        self.assertFalse(events[-1]["ok"])
+        self.assertEqual(events[-1]["failed"], 1)
+        self.assertEqual(events[-1]["error"], "boom")
+
     def test_prepare_projects_downloads_remote_archives(self):
         from src.runtime import prepare_projects
 
@@ -522,6 +710,38 @@ target_language = "ch"
         self.assertEqual(status["failed_projects"][0]["project_name"], "first")
         self.assertEqual(status["completed_projects"][0]["project_name"], "second")
 
+    def test_run_projects_failure_status_includes_output_and_log_paths(self):
+        class FakeCoordinatorAgent:
+            def __init__(self, config, project_dir, output_dir):
+                pass
+
+            def workflow_latextrans(self):
+                return {
+                    "ok": False,
+                    "pdf_path": None,
+                    "errors_report_path": None,
+                    "validation_summary": {"warnings": 1, "errors": 1, "total": 2},
+                    "error": "validation failed",
+                }
+
+        with patch("src.runtime.CoordinatorAgent", FakeCoordinatorAgent):
+            with redirect_stdout(StringIO()):
+                status = run_projects(
+                    config={"target_language": "ch"},
+                    projects=[r"D:\tex source\paper"],
+                    output_dir=r"D:\repo\outputs",
+                )
+
+        failure = status["failed_projects"][0]
+        self.assertEqual(failure["type"], "failed")
+        self.assertFalse(failure["ok"])
+        self.assertEqual(failure["output_dir"], r"D:\repo\outputs\ch_paper")
+        self.assertEqual(failure["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
+        self.assertIsNone(failure["pdf_path"])
+        self.assertIsNone(failure["errors_report_path"])
+        self.assertEqual(failure["validation_summary"], {"warnings": 1, "errors": 1, "total": 2})
+        self.assertEqual(failure["error"], "validation failed")
+
     def test_run_projects_uses_retranslation_workflow_when_requested(self):
         calls = []
 
@@ -586,6 +806,100 @@ target_language = "ch"
             final_event["project_terms_decisions_path"],
             r"outputs\ch_paper\project_terms_decisions.json",
         )
+
+    def test_run_projects_event_payload_includes_output_and_log_paths(self):
+        events = []
+
+        class FakeCoordinatorAgent:
+            def __init__(self, config, project_dir, output_dir):
+                pass
+
+            def workflow_latextrans(self):
+                return {
+                    "ok": True,
+                    "pdf_path": r"outputs\ch_paper\ch_paper.pdf",
+                    "errors_report_path": r"outputs\ch_paper\errors_report.json",
+                    "validation_summary": {"warnings": 0, "errors": 0, "total": 0},
+                    "error": None,
+                }
+
+        with patch("src.runtime.CoordinatorAgent", FakeCoordinatorAgent):
+            with redirect_stdout(StringIO()):
+                run_projects(
+                    config={"target_language": "ch"},
+                    projects=[r"D:\tex source\paper"],
+                    output_dir=r"D:\repo\outputs",
+                    event_callback=events.append,
+                )
+
+        start_event = events[0]
+        complete_event = events[1]
+        self.assertEqual(start_event["type"], "project_start")
+        self.assertEqual(start_event["output_dir"], r"D:\repo\outputs\ch_paper")
+        self.assertEqual(start_event["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
+        self.assertEqual(complete_event["type"], "project_complete")
+        self.assertEqual(complete_event["output_dir"], r"D:\repo\outputs\ch_paper")
+        self.assertEqual(complete_event["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
+        self.assertEqual(complete_event["pdf_path"], r"outputs\ch_paper\ch_paper.pdf")
+        self.assertIsNone(complete_event["error"])
+
+    def test_run_projects_exception_event_includes_paths_and_null_result_fields(self):
+        events = []
+
+        class FailingCoordinatorAgent:
+            def __init__(self, config, project_dir, output_dir):
+                pass
+
+            def workflow_latextrans(self):
+                raise RuntimeError("boom")
+
+        with patch("src.runtime.CoordinatorAgent", FailingCoordinatorAgent):
+            with redirect_stdout(StringIO()):
+                run_projects(
+                    config={"target_language": "ch"},
+                    projects=[r"D:\tex source\paper"],
+                    output_dir=r"D:\repo\outputs",
+                    event_callback=events.append,
+                )
+
+        error_event = events[1]
+        self.assertEqual(error_event["type"], "project_error")
+        self.assertEqual(error_event["output_dir"], r"D:\repo\outputs\ch_paper")
+        self.assertEqual(error_event["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
+        self.assertIsNone(error_event["pdf_path"])
+        self.assertIsNone(error_event["errors_report_path"])
+        self.assertIsNone(error_event["validation_summary"])
+        self.assertEqual(error_event["error"], "boom")
+
+    def test_run_projects_exception_status_includes_paths_and_null_result_fields(self):
+        class FailingCoordinatorAgent:
+            def __init__(self, config, project_dir, output_dir):
+                pass
+
+            def workflow_latextrans(self):
+                raise RuntimeError("boom")
+
+        with patch("src.runtime.CoordinatorAgent", FailingCoordinatorAgent):
+            with redirect_stdout(StringIO()):
+                status = run_projects(
+                    config={"target_language": "ch"},
+                    projects=[r"D:\tex source\paper"],
+                    output_dir=r"D:\repo\outputs",
+                )
+
+        failed_result = status["failed_projects"][0]
+        self.assertEqual(failed_result["type"], "failed")
+        self.assertFalse(failed_result["ok"])
+        self.assertEqual(failed_result["index"], 1)
+        self.assertEqual(failed_result["total"], 1)
+        self.assertEqual(failed_result["project_name"], "paper")
+        self.assertEqual(failed_result["project_dir"], r"D:\tex source\paper")
+        self.assertEqual(failed_result["output_dir"], r"D:\repo\outputs\ch_paper")
+        self.assertEqual(failed_result["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
+        self.assertIsNone(failed_result["pdf_path"])
+        self.assertIsNone(failed_result["errors_report_path"])
+        self.assertIsNone(failed_result["validation_summary"])
+        self.assertEqual(failed_result["error"], "boom")
 
 
 if __name__ == "__main__":

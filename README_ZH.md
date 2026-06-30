@@ -185,6 +185,28 @@ Validator 会检查 command 数量、placeholder 保留情况和括号平衡。�
 latextrans --arxiv 2508.18791
 ```
 
+## 输出 JSON Lines 事件
+
+面向 Zotero 插件等集成场景，LaTeXTransPlus 可以输出稳定的项目级 JSON Lines 事件：
+
+```bash
+latextrans --arxiv 2508.18791 --json-events stdout
+latextrans --arxiv 2508.18791 --json-events-file outputs/events.jsonl
+latextrans --arxiv 2508.18791 --json-events stdout --json-events-file outputs/events.jsonl
+```
+
+启用 `--json-events stdout` 后，stdout 只包含 JSON object，每行一条。普通 workflow 日志仍会写入每个项目目录下的 `latextrans.log`。
+
+第一版 schema 输出这些事件类型：
+
+- `run_start`
+- `project_start`
+- `project_complete`
+- `project_error`
+- `run_complete`
+
+每条事件都包含 `schema_version`、`type` 和 `timestamp`。项目事件还包含 `project_name`、`project_dir`、`output_dir` 和 `log_path`；完成与失败事件还包含 `pdf_path`、`errors_report_path`、`validation_summary` 和 `error`。
+
 支持带版本号的 arXiv ID：
 
 ```bash
