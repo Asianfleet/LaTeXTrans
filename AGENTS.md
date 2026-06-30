@@ -6,6 +6,7 @@ LaTeXTrans is a Python package for translating LaTeX paper sources and generatin
 
 ## Build, Test, and Development Commands
 
+- Activate and use the local `latextrans` conda environment for all project runs and tests; do not run this project from any other environment.
 - `pip install -e .`: install the package in editable mode with console scripts.
 - `latextrans --arxiv 2508.18791`: run the translation workflow for an arXiv ID.
 - `latextrans --project D:\path\to\paper_source.tar.gz`: process a local LaTeX project or archive.
