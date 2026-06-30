@@ -43,6 +43,26 @@ Textual App 只负责布局、交互、状态分发和视图切换；翻译工�
 
 UI 配置使用独立配置文件，不直接复用翻译配置文件作为写入目标。启动时如果存在 `config/default.toml`，将其复制为 UI 配置基底；否则基于 `config/template.toml` 生成 UI 配置。这样 UI 的默认布局、快捷键和外部集成设置可以单独演进。
 
+## 组件清单
+
+本次实现明确使用以下 Textual 组件：
+
+- 布局：`App`、`Horizontal`、`Vertical`、`VerticalScroll`、`ContentSwitcher`、`TabbedContent`、`TabPane`
+- 交互：`Button`、`Select`、`Input`、`TextArea`、`Switch`
+- 列表与表格：`ListView`、`ListItem`、`DataTable`
+- 状态与日志：`ProgressBar`、`RichLog`、`Static`
+- 底栏：`Footer`
+
+组件职责边界：
+
+- `ContentSwitcher` 只负责右侧 5 个主页面切换。
+- `TabbedContent` 只负责详情页内部的子视图切换。
+- `ListView` / `ListItem` 只负责左侧项目/结果列表。
+- `DataTable` 只负责任务管理页、术语表、错误记录等结构化展示。
+- `TextArea` 只负责批量输入、只读 tex 预览和 UI 配置文本编辑。
+- `RichLog` 只负责实时进度日志和事件摘要。
+- `ProgressBar` 只负责任务进度可视化。
+
 ## 页面与布局
 
 ### 主布局
@@ -55,12 +75,12 @@ UI 配置使用独立配置文件，不直接复用翻译配置文件作为写�
 
 左侧按钮区包含：
 
-- `新建任务`
-- `任务管理`
+- `新建任务`，使用 `Button`
+- `任务管理`，使用 `Button`
 
 左侧底部包含：
 
-- `设置`
+- `设置`，使用 `Button`
 
 ### 右侧页面
 
@@ -99,20 +119,24 @@ UI 配置使用独立配置文件，不直接复用翻译配置文件作为写�
 - 实时事件摘要
 - 最近一条日志摘要
 
+页面组件以 `ProgressBar`、`Static` 和 `RichLog` 为主。
+
 进度页不重新展示输入内容，不允许修改已提交任务。
 
 ### 详情页
 
 点击左侧项目/结果列表条目后切换到详情页。该页展示单个项目的详细结果，包括：
 
-- 翻译后的 tex 文件预览
-- 术语表
-- 错误记录
+- 翻译后的 tex 文件预览，使用只读 `TextArea`
+- 术语表，使用 `DataTable`
+- 错误记录，使用 `DataTable`
 - PDF 路径
 - 日志路径
 - 打开资源管理器
 - 打开 PDF
 - 导入 Zotero
+
+详情页内部使用 `TabbedContent` + `TabPane` 切换 tex、术语表、错误记录和日志等子视图。
 
 详情页只对当前选中的项目生效。
 
@@ -120,12 +144,21 @@ UI 配置使用独立配置文件，不直接复用翻译配置文件作为写�
 
 任务管理页用于查看每个条目的完整状态和详细信息。此页保持左侧列表存在，但列表项展示更简略；主区域展示每个任务的详细字段和操作入口。
 
+主区域使用 `DataTable` 展示任务字段、状态和路径。
+
 ### 配置页
 
 配置页编辑独立的 UI 配置文件。该文件不等同于翻译配置文件，但其初始化来源遵循：
 
 - 若 `config/default.toml` 存在，则复制其内容作为 UI 配置初始值。
 - 若 `config/default.toml` 不存在，则基于 `config/template.toml` 创建 UI 配置。
+
+配置页采用表单式编辑，字段类型分别使用：
+
+- `Input`：字符串和路径
+- `Select`：枚举项
+- `Switch`：布尔项
+- `TextArea`：多行文本和完整 TOML 预览
 
 配置页支持保存与重新载入。
 
@@ -182,6 +215,8 @@ TUI 直接消费现有项目事件，而不是解析普通 stdout。第一版只
 - 选中条目
 - 将当前项目生成的翻译 PDF 作为附件导入该条目
 
+Zotero 选择与搜索界面使用 `Input`、`ListView`、`ListItem`、`Button` 和 `Static`。
+
 不实现：
 
 - 新建 Zotero 条目
@@ -196,7 +231,7 @@ TUI 直接消费现有项目事件，而不是解析普通 stdout。第一版只
 
 - 在系统文件资源管理器中打开项目输出目录
 - 打开翻译后的 PDF
-- 打开译文 tex 文件，并优先以只读文本视图展示；实现上可使用 Textual `TextArea` 或等价只读文本容器
+- 打开译文 tex 文件，并优先以只读文本视图展示；实现上使用只读 `TextArea`
 - 查看术语表和错误记录
 
 查看 tex 文件采用只读预览，不提供编辑器能力。
