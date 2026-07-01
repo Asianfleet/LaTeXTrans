@@ -179,6 +179,16 @@ The validator checks command counts, placeholder preservation, and bracket balan
 
 # 📚 Usage
 
+## Terminal UI
+
+LaTeXTransPlus also provides a Textual terminal UI:
+
+```bash
+latextrans-tui
+```
+
+The UI supports one input type per task: arXiv IDs or URLs, local project paths or archives, or remote archive URLs. It displays project-level progress, result files, logs, validation reports, and UI-specific configuration. Zotero integration is optional and does not block translation results.
+
 ## Translate by arXiv ID
 
 ```bash
