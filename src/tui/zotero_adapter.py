@@ -86,7 +86,10 @@ class ZoteroAdapter:
         )
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr.strip() or "Zotero command failed.")
-        return json.loads(completed.stdout or "[]")
+        body = json.loads(completed.stdout or "[]")
+        if isinstance(body, dict) and "result" in body:
+            return body["result"]
+        return body
 
     def _library_prefix(self, library_id: str, library_type: str) -> str:
         """Return the Zotero Web API library prefix."""

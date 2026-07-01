@@ -159,3 +159,90 @@ OK
 - 当前 adapter 单元测试使用 mock session，未对真实 Zotero API 做端到端上传验证。
 - `attach_pdf()` 目前为同步实现，后续 UI 集成时需要避免阻塞 Textual message loop。
 - 当前实现不处理 Zotero 409/412/413/429 的专门用户提示，只通过 `raise_for_status()` 抛出请求异常。
+
+## 复审修复：CLI JSON envelope 解析
+
+### 问题
+
+复审指出现有 Zotero CLI 的 `--json` 成功输出是 envelope：
+
+```json
+{"command": "...", "result": ...}
+```
+
+而不是裸数组。旧版 `_run_cli_json()` 直接返回 `json.loads(stdout)`，会导致 `list_libraries()` 和 `search_items()` 在真实 CLI 下返回外层 dict，不符合 brief 约定的 `list[dict]`。
+
+### 核对证据
+
+已核对：
+
+```powershell
+rg -n "json|command|result|print|dumps" 'D:\Workspace\resources\skills\zotero-skill\zotero\scripts\zotero.py'
+```
+
+关键代码位于 `zotero.py`：
+
+```text
+_json_dump({"command": result.command, "result": result.data}, sys.stdout)
+```
+
+因此真实成功输出确认为 `command/result` envelope。
+
+### 修复
+
+- `_run_cli_json()` 现在会在 stdout 为 dict 且包含 `result` 时返回 `body["result"]`。
+- 保留裸数组/裸 JSON 兼容：不含 `result` 的 JSON 仍原样返回。
+- CLI mock 已改为真实 envelope 输出。
+- 新增测试锁定 `_run_cli_json()` 只返回 envelope 的 `result`。
+- 补充断言：
+  - 上传授权请求包含 `If-None-Match: *`。
+  - 上传授权表单包含 `md5`、`filesize`、`contentType`。
+  - 注册上传请求包含 `If-None-Match: *`。
+
+### TDD RED
+
+命令：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_zotero_adapter
+```
+
+结果：失败，符合预期。
+
+关键输出：
+
+```text
+KeyError: 0
+AssertionError: {'command': 'list-libraries', 'result': ...} != [{'library_id': '42', 'library_type': 'group'}]
+FAILED (failures=1, errors=2)
+```
+
+### GREEN 与最终验证
+
+命令：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_zotero_adapter
+```
+
+结果：
+
+```text
+Ran 5 tests in 0.041s
+OK
+```
+
+命令：
+
+```powershell
+conda run -n latextrans python -m unittest discover tests
+```
+
+结果：
+
+```text
+Ran 221 tests in 11.273s
+OK
+```
+
+备注：全量测试输出包含 TerminologyAgent 预期日志和 Textual 慢 message pump 提示，但退出码为 0。

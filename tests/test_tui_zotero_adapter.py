@@ -18,7 +18,12 @@ class ZoteroAdapterTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(
             args=["python"],
             returncode=0,
-            stdout=json.dumps([{"library_id": "1", "library_type": "user"}]),
+            stdout=json.dumps(
+                {
+                    "command": "list-libraries",
+                    "result": [{"library_id": "1", "library_type": "user"}],
+                }
+            ),
             stderr="",
         )
         with patch("subprocess.run", return_value=completed) as run_mock:
@@ -36,7 +41,12 @@ class ZoteroAdapterTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(
             args=["python"],
             returncode=0,
-            stdout=json.dumps([{"key": "ITEM123", "title": "Paper"}]),
+            stdout=json.dumps(
+                {
+                    "command": "search-items",
+                    "result": [{"key": "ITEM123", "title": "Paper"}],
+                }
+            ),
             stderr="",
         )
         with patch("subprocess.run", return_value=completed) as run_mock:
@@ -52,6 +62,28 @@ class ZoteroAdapterTests(unittest.TestCase):
         self.assertIn("42", command)
         self.assertIn("--library-type", command)
         self.assertIn("group", command)
+
+    def test_run_cli_json_returns_result_from_zotero_cli_envelope(self):
+        """Parse the real Zotero CLI JSON envelope and return only result data."""
+        completed = subprocess.CompletedProcess(
+            args=["python"],
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "command": "list-libraries",
+                    "result": [{"library_id": "42", "library_type": "group"}],
+                }
+            ),
+            stderr="",
+        )
+        with patch("subprocess.run", return_value=completed):
+            result = ZoteroAdapter(
+                python_cmd=["python"],
+                script_path="zotero.py",
+                api_key="secret",
+            )._run_cli_json(["list-libraries"])
+
+        self.assertEqual(result, [{"library_id": "42", "library_type": "group"}])
 
     def test_attach_pdf_creates_child_attachment_and_uploads_file(self):
         """Attach a translated PDF through child attachment and upload requests."""
@@ -94,7 +126,13 @@ class ZoteroAdapterTests(unittest.TestCase):
         write_token = create_call.kwargs["headers"]["Zotero-Write-Token"]
         self.assertEqual(len(write_token), 32)
         self.assertNotIn("-", write_token)
+        auth_call = session.post.call_args_list[1]
+        self.assertEqual(auth_call.kwargs["headers"]["If-None-Match"], "*")
+        self.assertIn("md5", auth_call.kwargs["data"])
+        self.assertEqual(auth_call.kwargs["data"]["filesize"], str(len(b"%PDF translated")))
+        self.assertEqual(auth_call.kwargs["data"]["contentType"], "application/pdf")
         register_call = session.post.call_args_list[3]
+        self.assertEqual(register_call.kwargs["headers"]["If-None-Match"], "*")
         self.assertEqual(register_call.kwargs["data"]["upload"], "UPLOAD1")
 
     def test_attach_pdf_returns_exists_when_zotero_reports_existing_file(self):
