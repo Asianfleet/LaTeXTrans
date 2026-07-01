@@ -228,6 +228,35 @@ class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#task-progress", ProgressBar).progress, 1)
             self.assertTrue(any("runner failed" in str(event) for event in app.current_task.events))
 
+    async def test_remote_prepare_failure_does_not_remap_error_to_input_url(self):
+        """确认 remote prepare 全失败后不会再补发绑定到输入 URL 的 project_error。"""
+        app = LaTeXTransTuiApp()
+        remote_inputs = [
+            "https://example.test/first.zip",
+            "https://example.test/second.zip",
+        ]
+
+        def failing_remote_runner(**kwargs):
+            """模拟 remote prepare 全失败时 runner 先发 run_start total=0 再抛错。"""
+            kwargs["event_callback"]({"type": "run_start", "total": 0})
+            raise RuntimeError("No valid TeX projects available for processing.")
+
+        async with app.run_test() as pilot:
+            app.current_task = TaskViewState(input_type="remote", inputs=remote_inputs)
+
+            with patch("src.tui.app.run_tui_task", side_effect=failing_remote_runner):
+                app.start_current_task()
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+
+            self.assertEqual(app.current_task.total, 0)
+            self.assertEqual(app.current_task.failed, 0)
+            self.assertEqual(app.current_task.projects, [])
+            self.assertEqual(app.current_task.events, [{"type": "run_start", "total": 0}])
+            self.assertFalse(
+                any(project.project_name in remote_inputs for project in app.current_task.projects)
+            )
+
 
 class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
     """验证任务结果列表、表格和项目详情页会读取项目状态。"""

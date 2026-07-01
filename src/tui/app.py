@@ -431,6 +431,8 @@ class LaTeXTransTuiApp(App[None]):
                 event_callback=callback,
             )
         except Exception as exc:
+            if task.input_type == "remote" and task.total == 0:
+                return
             project_name = task.running_project or (task.inputs[0] if task.inputs else "task")
             self.call_from_thread(
                 self.handle_runtime_event,

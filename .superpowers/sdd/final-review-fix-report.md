@@ -386,3 +386,74 @@ OK
 ```
 
 备注：输出包含既有 TerminologyAgent 日志和 Textual 慢 message pump 提示，退出码为 0。
+
+## Final re-review 修复：app 不再把 remote prepare 全失败重映射到首个 URL
+
+### 问题
+
+- `src/tui/runner.py` 在 remote prepare 全失败时会先发送 `{"type": "run_start", "total": 0}`，然后重抛异常。
+- `src/tui/app.py` 的 `run_current_task()` 通用异常处理随后仍会补发一个 `project_error`，`project_name` 取 `task.inputs[0]`。
+- 结果 UI 状态会变成 `total=0, failed=1`，并错误地把失败绑定到第一个 remote URL，违背“remote skip 不绑定具体 URL”的修复意图。
+
+### 修复
+
+- 在 `LaTeXTransTuiApp.run_current_task()` 的异常分支中增加特例判断：
+  - 当 `task.input_type == "remote"` 且 `task.total == 0` 时，直接返回。
+- 这样当 runner 已明确把 remote prepare 结果表达为 `run_start total=0` 时，app 不再额外构造 per-input `project_error`。
+- 非 remote 路径或 remote 但 `total > 0` 的异常路径保持原有可见错误行为。
+
+### TDD RED
+
+新增测试：
+
+- `tests.test_tui_app.TuiProgressTests.test_remote_prepare_failure_does_not_remap_error_to_input_url`
+
+RED 命令：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_app.TuiProgressTests.test_remote_prepare_failure_does_not_remap_error_to_input_url
+```
+
+结果：
+
+```text
+FAIL: test_remote_prepare_failure_does_not_remap_error_to_input_url
+AssertionError: 1 != 0
+```
+
+### GREEN 与验证
+
+目标测试：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_app.TuiProgressTests.test_remote_prepare_failure_does_not_remap_error_to_input_url
+```
+
+结果：
+
+```text
+Ran 1 test in 0.939s
+OK
+```
+
+联测：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_app tests.test_tui_runner
+```
+
+结果：
+
+```text
+Ran 30 tests in 16.230s
+OK
+```
+
+### 本次变更文件
+
+- `src/tui/app.py`
+  - remote `total == 0` 的异常整合路径不再补发 `project_error`。
+- `tests/test_tui_app.py`
+  - 增加 remote prepare 全失败回归测试。
+- `.superpowers/sdd/final-review-fix-report.md`
+  - 追加本次 final re-review fix 记录与 RED/GREEN 证据。
