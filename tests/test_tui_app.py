@@ -1,7 +1,9 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from textual.widgets import ContentSwitcher, Footer, ListView, ProgressBar, RichLog, Select, Static, TextArea
+from textual.widgets import ContentSwitcher, DataTable, Footer, Label, ListView, ProgressBar, RichLog, Select, Static, TextArea
 
 from setup import load_requirements
 from src.tui.app import (
@@ -12,7 +14,7 @@ from src.tui.app import (
     PAGE_TASKS,
     LaTeXTransTuiApp,
 )
-from src.tui.state import TaskViewState
+from src.tui.state import ProjectStatus, ProjectViewState, TaskViewState
 
 
 class TuiPackagingTests(unittest.TestCase):
@@ -202,6 +204,98 @@ class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("runner failed", str(app.query_one("#progress-summary", Static).content))
             self.assertEqual(app.query_one("#task-progress", ProgressBar).progress, 1)
             self.assertTrue(any("runner failed" in str(event) for event in app.current_task.events))
+
+
+class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
+    """验证任务结果列表、表格和项目详情页会读取项目状态。"""
+
+    async def test_select_project_updates_detail_page(self):
+        """确认选择项目会记录名称并切换到详情页。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test():
+            app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
+            app.current_task.projects.append(
+                ProjectViewState(
+                    project_name="paper",
+                    status=ProjectStatus.COMPLETED,
+                    output_dir="outputs/ch_paper",
+                    pdf_path="paper.pdf",
+                )
+            )
+
+            app.select_project("paper")
+
+            self.assertEqual(app.selected_project_name, "paper")
+            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_DETAIL)
+            self.assertIn("paper.pdf", str(app.query_one("#detail-paths", Static).content))
+
+    async def test_refresh_task_table_adds_project_rows(self):
+        """确认任务管理表会展示当前任务下的项目行。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test():
+            app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
+            app.current_task.projects.append(ProjectViewState(project_name="paper", status=ProjectStatus.COMPLETED))
+
+            app.refresh_task_table()
+
+            table = app.query_one("#task-table", DataTable)
+            self.assertEqual(table.row_count, 1)
+            self.assertEqual(table.get_cell_at((0, 0)), "paper")
+            self.assertEqual(table.get_cell_at((0, 1)), "completed")
+
+    async def test_refresh_project_list_adds_selectable_items(self):
+        """确认侧栏项目列表会展示当前任务下的项目。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test() as pilot:
+            app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
+            app.current_task.projects.append(ProjectViewState(project_name="paper", status=ProjectStatus.RUNNING))
+
+            app.refresh_project_list()
+            await pilot.pause()
+
+            list_view = app.query_one("#project-list", ListView)
+            self.assertEqual(len(list_view.children), 1)
+            self.assertIn("paper", str(list_view.children[0].query_one(Label).render()))
+
+    async def test_refresh_detail_page_populates_project_artifacts(self):
+        """确认详情页会展示路径、错误、日志，并保持 TeX 预览只读。"""
+        app = LaTeXTransTuiApp()
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            tex_file = project_dir / "main.tex"
+            log_file = project_dir / "paper.log"
+            tex_file.write_text("\\section{Result}", encoding="utf-8")
+            log_file.write_text("compile ok", encoding="utf-8")
+
+            async with app.run_test() as pilot:
+                app.current_task = TaskViewState(input_type="local", inputs=[str(project_dir)])
+                app.current_task.projects.append(
+                    ProjectViewState(
+                        project_name="paper",
+                        status=ProjectStatus.FAILED,
+                        project_dir=str(project_dir),
+                        output_dir=str(project_dir / "out"),
+                        pdf_path=str(project_dir / "paper.pdf"),
+                        errors_report_path=str(project_dir / "errors.md"),
+                        log_path=str(log_file),
+                        error="compile failed",
+                    )
+                )
+                app.selected_project_name = "paper"
+
+                app.refresh_detail_page()
+                await pilot.pause()
+
+                self.assertIn("paper.pdf", str(app.query_one("#detail-paths", Static).content))
+                self.assertIn("compile failed", str(app.query_one("#detail-paths", Static).content))
+                tex_preview = app.query_one("#tex-preview", TextArea)
+                self.assertTrue(tex_preview.read_only)
+                self.assertIn("\\section{Result}", tex_preview.text)
+                self.assertIn("compile ok", str(app.query_one("#project-log-summary", Static).content))
+                errors_table = app.query_one("#errors-table", DataTable)
+                self.assertEqual(errors_table.row_count, 1)
+                self.assertEqual(errors_table.get_cell_at((0, 0)), str(project_dir / "errors.md"))
+                self.assertEqual(errors_table.get_cell_at((0, 1)), "compile failed")
 
 
 if __name__ == "__main__":

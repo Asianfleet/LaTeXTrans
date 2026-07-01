@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -11,6 +13,8 @@ from textual.widgets import (
     DataTable,
     Footer,
     Input,
+    Label,
+    ListItem,
     ListView,
     ProgressBar,
     RichLog,
@@ -25,7 +29,7 @@ from textual.widgets import (
 from src.tui.config import UI_CONFIG_PATH
 from src.tui.input_parser import parse_input_items, validate_input_items
 from src.tui.runner import run_tui_task
-from src.tui.state import TaskViewState
+from src.tui.state import ProjectViewState, TaskViewState
 
 PAGE_ENTRY = "entry"
 PAGE_PROGRESS = "progress"
@@ -38,6 +42,7 @@ class LaTeXTransTuiApp(App[None]):
     """Main Textual application for LaTeXTransPlus."""
 
     current_task: TaskViewState | None = None
+    selected_project_name: str | None = None
 
     BINDINGS = [
         ("q", "quit", "退出"),
@@ -83,6 +88,7 @@ class LaTeXTransTuiApp(App[None]):
                         with TabPane("错误记录", id="errors-tab"):
                             yield DataTable(id="errors-table")
                         with TabPane("日志", id="log-tab"):
+                            yield Static("", id="project-log-summary")
                             yield RichLog(id="project-log")
                     yield Static("", id="detail-paths")
                     yield Button("打开输出目录", id="open-output-button")
@@ -101,6 +107,56 @@ class LaTeXTransTuiApp(App[None]):
     def switch_page(self, page_id: str) -> None:
         """Switch the right-side content area to the given page."""
         self.query_one("#main-switcher", ContentSwitcher).current = page_id
+
+    def select_project(self, project_name: str) -> None:
+        """Select a project and open its read-only detail page."""
+        self.selected_project_name = project_name
+        self.refresh_detail_page()
+        self.switch_page(PAGE_DETAIL)
+
+    def refresh_project_list(self) -> None:
+        """Refresh the left-side project list from current task state."""
+        list_view = self.query_one("#project-list", ListView)
+        list_view.clear()
+        if self.current_task is None:
+            return
+
+        for project in self.current_task.projects:
+            list_view.append(ListItem(Label(f"{project.project_name} [{project.status.value}]")))
+
+    def refresh_detail_page(self) -> None:
+        """Refresh read-only detail widgets for the selected project."""
+        project = self._selected_project()
+        if project is None:
+            return
+
+        self._refresh_tex_preview(project)
+        self._refresh_project_log(project)
+        self._refresh_errors_table(project)
+        self.query_one("#detail-paths", Static).update(self._project_detail_summary(project))
+
+    def refresh_task_table(self) -> None:
+        """Refresh the task management table from current project states."""
+        table = self.query_one("#task-table", DataTable)
+        table.clear(columns=True)
+        table.add_columns("项目", "状态", "PDF", "输出目录")
+        if self.current_task is None:
+            return
+
+        for project in self.current_task.projects:
+            table.add_row(
+                project.project_name,
+                project.status.value,
+                project.pdf_path or "",
+                project.output_dir or "",
+            )
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Handle sidebar project selection from the project list."""
+        if event.list_view.id != "project-list" or self.current_task is None:
+            return
+        if 0 <= event.index < len(self.current_task.projects):
+            self.select_project(self.current_task.projects[event.index].project_name)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """处理主导航和任务入口按钮。"""
@@ -144,6 +200,8 @@ class LaTeXTransTuiApp(App[None]):
         target_task.apply_event(dict(event))
         self._refresh_progress_widgets(target_task)
         self.query_one("#event-log", RichLog).write(str(event))
+        self.refresh_project_list()
+        self.refresh_task_table()
 
     def _refresh_progress_widgets(self, task: TaskViewState) -> None:
         """根据任务状态刷新摘要和进度条。"""
@@ -158,6 +216,86 @@ class LaTeXTransTuiApp(App[None]):
             summary = f"{summary}，错误 {last_error}"
         self.query_one("#progress-summary", Static).update(summary)
         self.query_one("#task-progress", ProgressBar).update(total=task.total, progress=finished)
+
+    def _selected_project(self) -> ProjectViewState | None:
+        """Return the currently selected project state."""
+        if self.current_task is None or self.selected_project_name is None:
+            return None
+        for project in self.current_task.projects:
+            if project.project_name == self.selected_project_name:
+                return project
+        return None
+
+    def _project_detail_summary(self, project: ProjectViewState) -> str:
+        """Build the visible detail summary for project artifacts."""
+        lines = [
+            f"项目: {project.project_name}",
+            f"状态: {project.status.value}",
+            f"PDF: {project.pdf_path or '-'}",
+            f"Output: {project.output_dir or '-'}",
+            f"Log: {project.log_path or '-'}",
+            f"错误报告: {project.errors_report_path or '-'}",
+        ]
+        if project.error:
+            lines.append(f"错误: {project.error}")
+        return "\n".join(lines)
+
+    def _refresh_tex_preview(self, project: ProjectViewState) -> None:
+        """Load the first TeX source as a read-only preview."""
+        tex_preview = self.query_one("#tex-preview", TextArea)
+        tex_preview.read_only = True
+        tex_path = self._find_tex_preview_path(project)
+        if tex_path is None:
+            tex_preview.text = ""
+            return
+
+        try:
+            tex_preview.text = tex_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            tex_preview.text = f"无法读取 TeX 文件：{exc}"
+
+    def _find_tex_preview_path(self, project: ProjectViewState) -> Path | None:
+        """Find a representative TeX file for the project preview."""
+        if project.project_dir is None:
+            return None
+
+        project_dir = Path(project.project_dir)
+        if not project_dir.exists():
+            return None
+
+        main_tex = project_dir / "main.tex"
+        if main_tex.is_file():
+            return main_tex
+
+        try:
+            return next(path for path in sorted(project_dir.glob("*.tex")) if path.is_file())
+        except StopIteration:
+            return None
+
+    def _refresh_project_log(self, project: ProjectViewState) -> None:
+        """Load the selected project's log file into the log panel."""
+        log_widget = self.query_one("#project-log", RichLog)
+        log_summary = self.query_one("#project-log-summary", Static)
+        log_widget.clear()
+        if project.log_path is None:
+            log_summary.update("")
+            return
+
+        try:
+            log_text = Path(project.log_path).read_text(encoding="utf-8")
+        except OSError as exc:
+            log_text = f"无法读取日志文件：{exc}"
+        log_summary.update(log_text)
+        log_widget.write(log_text)
+
+    def _refresh_errors_table(self, project: ProjectViewState) -> None:
+        """Refresh the selected project's error report table."""
+        table = self.query_one("#errors-table", DataTable)
+        table.clear(columns=True)
+        table.add_columns("错误报告", "错误信息")
+        if project.errors_report_path is None and project.error is None:
+            return
+        table.add_row(project.errors_report_path or "", project.error or "")
 
     def start_current_task(self) -> None:
         """通过 Textual worker 启动当前任务。"""
