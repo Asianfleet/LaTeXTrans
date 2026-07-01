@@ -13,7 +13,6 @@ from textual.widgets import (
     DataTable,
     Footer,
     Input,
-    Label,
     ListItem,
     ListView,
     ProgressBar,
@@ -122,7 +121,7 @@ class LaTeXTransTuiApp(App[None]):
             return
 
         for project in self.current_task.projects:
-            list_view.append(ListItem(Label(f"{project.project_name} [{project.status.value}]")))
+            list_view.append(ListItem(Static(f"{project.project_name} [{project.status.value}]")))
 
     def refresh_detail_page(self) -> None:
         """Refresh read-only detail widgets for the selected project."""

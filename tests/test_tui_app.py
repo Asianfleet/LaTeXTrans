@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from textual.widgets import ContentSwitcher, DataTable, Footer, Label, ListView, ProgressBar, RichLog, Select, Static, TextArea
+from textual.widgets import ContentSwitcher, DataTable, Footer, ListView, ProgressBar, RichLog, Select, Static, TextArea
 
 from setup import load_requirements
 from src.tui.app import (
@@ -255,7 +255,7 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
 
             list_view = app.query_one("#project-list", ListView)
             self.assertEqual(len(list_view.children), 1)
-            self.assertIn("paper", str(list_view.children[0].query_one(Label).render()))
+            self.assertIn("paper", str(list_view.children[0].query_one(Static).content))
 
     async def test_refresh_detail_page_populates_project_artifacts(self):
         """确认详情页会展示路径、错误、日志，并保持 TeX 预览只读。"""

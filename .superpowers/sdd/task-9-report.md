@@ -98,3 +98,36 @@ conda run -n latextrans python -m unittest tests.test_tui_app
 
 - `RichLog.write()` 在 Textual 中可能延迟到控件尺寸已知后渲染，因此增加了 `project-log-summary` 作为同一日志内容的稳定可见摘要；这会让日志 tab 同时有摘要和滚动日志。
 - 当前 TeX 预览只做简单文件选择：优先 `main.tex`，否则项目目录顶层第一个 `.tex`，不递归查找子目录。
+
+## 复审修复：允许组件清单
+
+复审指出 `ListItem` 本身在允许清单内，但 Task 9 初始实现新增并使用了清单外组件 `Label`。修复方式：
+
+- 从 `src/tui/app.py` 移除 `Label` 导入。
+- 项目列表项从 `ListItem(Label(...))` 改为 `ListItem(Static(...))`。
+- 从 `tests/test_tui_app.py` 移除 `Label` 导入和查询，改为查询 `Static` 内容。
+- 未实现 Task 10+，未扩大功能范围。
+
+TDD 修复证据：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_app.TuiResultViewsTests
+```
+
+RED：新增断言确认列表项不应包含 `Label` 子组件，当前实现失败，失败信息为 `Exception not raised`。
+
+GREEN：替换为 `Static` 后同一命令通过，`Ran 4 tests ... OK`。
+
+复审后验证：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_app
+```
+
+结果：`Ran 16 tests in 11.089s`，`OK`。
+
+```powershell
+conda run -n latextrans python -m unittest discover tests
+```
+
+结果：`Ran 214 tests in 11.987s`，`OK`。运行期间存在既有 agent 日志和 Textual message pump 调试提示，但命令退出码为 0。
