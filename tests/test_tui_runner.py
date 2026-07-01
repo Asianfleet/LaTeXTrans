@@ -138,8 +138,8 @@ class TuiRunnerTests(unittest.TestCase):
         self.assertEqual([event["type"] for event in events], ["project_error", "project_error"])
         self.assertEqual([event["project_name"] for event in events], [r"D:\missing-one", r"D:\missing-two"])
 
-    def test_run_tui_task_remote_skip_uses_counts_not_url_names(self):
-        """Remote inputs should not be marked skipped when prepared project names differ."""
+    def test_run_tui_task_remote_skip_resets_total_without_url_errors(self):
+        """Remote skips should reset total without marking a specific URL failed."""
         config = {"target_language": "ch", "paper_list": []}
         events = []
 
@@ -171,8 +171,40 @@ class TuiRunnerTests(unittest.TestCase):
                             events.append,
                         )
 
-        self.assertEqual([event["type"] for event in events], ["project_error", "project_complete"])
-        self.assertEqual(events[0]["project_name"], "https://example.test/missing.zip")
+        self.assertEqual([event["type"] for event in events], ["run_start", "project_complete"])
+        self.assertEqual(events[0]["total"], 1)
+        self.assertFalse(
+            any(
+                event.get("type") == "project_error"
+                and str(event.get("project_name", "")).startswith("https://example.test/")
+                for event in events
+            )
+        )
+
+    def test_run_tui_task_remote_prepare_error_resets_total_without_url_errors(self):
+        """Remote prepare errors should reset total to zero without per-URL failures."""
+        config = {"target_language": "ch", "paper_list": []}
+        events = []
+
+        with patch("src.tui.runner.ensure_ui_config", return_value=Path("config/ui.toml")):
+            with patch("src.tui.runner.runtime.load_runtime_config", return_value=config):
+                with patch(
+                    "src.tui.runner.runtime.prepare_projects",
+                    side_effect=ValueError("No valid TeX projects available for processing."),
+                ):
+                    with self.assertRaisesRegex(ValueError, "No valid TeX projects"):
+                        run_tui_task(
+                            "config/ui.toml",
+                            "remote",
+                            [
+                                "https://example.test/first.zip",
+                                "https://example.test/second.zip",
+                            ],
+                            {},
+                            events.append,
+                        )
+
+        self.assertEqual(events, [{"type": "run_start", "total": 0}])
 
 
 if __name__ == "__main__":

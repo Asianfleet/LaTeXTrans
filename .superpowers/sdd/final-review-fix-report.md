@@ -325,3 +325,64 @@ OK
 - `tests/test_tui_app.py`
   - 稳定 Zotero 导入测试，避免异步 button message race。
   - 增加按钮分支同步单元测试。
+
+## Final re-review 修复：remote skip 不绑定具体 URL
+
+### 问题
+
+上一轮 remote skip 改为按数量取 `items[len(projects):]` 后仍存在歧义：如果第一个 remote URL 失败、第二个 URL 成功，runner 会误把第二个 URL 标成 skipped。runtime 当前不返回精确 remote skip 列表，因此 runner 不能可靠地把 skipped 绑定到具体 URL。
+
+### 修复
+
+- `input_type == "remote"` 且 prepare 成功时，不再生成任何 per-URL `project_error`。
+- 改为发送 `{"type": "run_start", "total": len(projects)}`，把 UI total 重置为真实 prepared project 数。
+- `input_type == "remote"` 且 prepare 全部失败抛 `ValueError` 时，发送 `{"type": "run_start", "total": 0}` 后重抛，避免误标具体 URL。
+- local 输入仍保留 path/name 匹配，并继续为 skipped item 生成 per-item `project_error`。
+
+### TDD RED
+
+命令：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_runner tests.test_tui_app
+```
+
+关键失败：
+
+```text
+FAIL: test_run_tui_task_remote_skip_resets_total_without_url_errors
+AssertionError: ['project_error', 'project_complete'] != ['run_start', 'project_complete']
+
+FAIL: test_run_tui_task_remote_prepare_error_resets_total_without_url_errors
+AssertionError: [{'type': 'project_error', ...}] != [{'type': 'run_start', 'total': 0}]
+```
+
+### GREEN 与验证
+
+聚焦测试：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_runner tests.test_tui_app
+```
+
+结果：
+
+```text
+Ran 29 tests in 15.439s
+OK
+```
+
+全量测试：
+
+```powershell
+conda run -n latextrans python -m unittest discover tests
+```
+
+结果：
+
+```text
+Ran 231 tests in 17.573s
+OK
+```
+
+备注：输出包含既有 TerminologyAgent 日志和 Textual 慢 message pump 提示，退出码为 0。

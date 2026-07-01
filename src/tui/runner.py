@@ -44,7 +44,7 @@ def run_tui_task(
             all_existing=False,
         )
     except ValueError:
-        _emit_prepare_failure_events(items, event_callback)
+        _emit_prepare_failure_events(input_type, items, event_callback)
         raise
     _emit_prepare_skip_events(input_type, items, projects, event_callback)
     project_status = runtime.run_projects(
@@ -71,13 +71,19 @@ def _emit_prepare_skip_events(
     event_callback: TuiEventCallback,
 ) -> None:
     """Emit UI-visible failure events for inputs skipped before runtime processing."""
+    if input_type == "remote":
+        event_callback({"type": "run_start", "total": len(projects)})
+        return
     skipped_items = _prepare_skipped_items(input_type, items, projects)
     for item in skipped_items:
         _emit_prepare_error(item, event_callback)
 
 
-def _emit_prepare_failure_events(items: list[str], event_callback: TuiEventCallback) -> None:
+def _emit_prepare_failure_events(input_type: str, items: list[str], event_callback: TuiEventCallback) -> None:
     """Emit UI-visible failure events for every input when prepare fails completely."""
+    if input_type == "remote":
+        event_callback({"type": "run_start", "total": 0})
+        return
     for item in items:
         _emit_prepare_error(item, event_callback)
 
@@ -97,8 +103,6 @@ def _prepare_skipped_items(input_type: str, items: list[str], projects: list[str
     """Infer which submitted items did not produce prepared project directories."""
     if len(projects) >= len(items):
         return []
-    if input_type == "remote":
-        return items[len(projects) :]
 
     remaining_projects = [str(project) for project in projects]
     skipped: list[str] = []
