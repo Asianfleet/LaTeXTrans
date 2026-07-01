@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import toml
@@ -29,9 +30,10 @@ from textual.widgets import (
 )
 
 from src.tui.config import UI_CONFIG_PATH, load_ui_config, save_ui_config
+from src.tui.history import load_output_history, write_project_metadata
 from src.tui.input_parser import parse_input_items, validate_input_items
 from src.tui.runner import run_tui_task
-from src.tui.state import ProjectViewState, TaskViewState
+from src.tui.state import ProjectStatus, ProjectViewState, TaskViewState
 from src.tui.zotero_adapter import ZoteroAdapter
 
 PAGE_ENTRY = "entry"
@@ -45,7 +47,9 @@ class LaTeXTransTuiApp(App[None]):
     """Main Textual application for LaTeXTransPlus."""
 
     current_task: TaskViewState | None = None
+    tasks: list[TaskViewState]
     selected_project_name: str | None = None
+    selected_task_id: str | None = None
     zotero_adapter_factory = staticmethod(
         lambda api_key, script_path: ZoteroAdapter(
             python_cmd=[sys.executable],
@@ -57,16 +61,25 @@ class LaTeXTransTuiApp(App[None]):
     BINDINGS = [
         ("q", "quit", "退出"),
         ("n", "new_task", "新建任务"),
-        ("m", "task_manager", "任务管理"),
+        ("m", "project_manager", "项目管理"),
         ("s", "settings", "设置"),
     ]
+
+    def __init__(self, load_history_on_mount: bool = True) -> None:
+        """Initialize in-memory task history for the terminal UI."""
+        super().__init__()
+        self.current_task = None
+        self.tasks = []
+        self.selected_project_name = None
+        self.selected_task_id = None
+        self.load_history_on_mount = load_history_on_mount
 
     def compose(self) -> ComposeResult:
         """Compose the persistent sidebar, content switcher, and footer."""
         with Horizontal(id="app-body"):
             with Vertical(id="sidebar"):
                 yield Button("新建任务", id="new-task-button")
-                yield Button("任务管理", id="task-manager-button")
+                yield Button("项目管理", id="project-manager-button")
                 yield ListView(id="project-list")
                 yield Button("设置", id="settings-button")
             with ContentSwitcher(initial=PAGE_ENTRY, id="main-switcher"):
@@ -120,25 +133,53 @@ class LaTeXTransTuiApp(App[None]):
                     yield Button("重载", id="reload-config-button")
         yield Footer()
 
+    def on_mount(self) -> None:
+        """Load existing output projects into the sidebar when the app starts."""
+        if not self.load_history_on_mount:
+            return
+        self.load_output_history()
+
     def switch_page(self, page_id: str) -> None:
         """Switch the right-side content area to the given page."""
         self.query_one("#main-switcher", ContentSwitcher).current = page_id
 
-    def select_project(self, project_name: str) -> None:
+    def load_output_history(self) -> None:
+        """Load output directory history into task state and refresh project views."""
+        history_tasks = load_output_history(self._history_output_root())
+        if not history_tasks:
+            self.refresh_project_list()
+            self.refresh_task_table()
+            return
+
+        current_tasks = [task for task in self.tasks if task is self.current_task]
+        self.tasks = self._merge_history_tasks(history_tasks, current_tasks)
+        self.refresh_project_list()
+        self.refresh_task_table()
+
+    def select_project(self, project_name: str, task_id: str | None = None) -> None:
         """Select a project and open its read-only detail page."""
+        if task_id is None:
+            project_identity = next(
+                (
+                    (task.task_id, project.project_name)
+                    for task, project in self._iter_project_states()
+                    if project.project_name == project_name
+                ),
+                (None, project_name),
+            )
+            task_id = project_identity[0]
         self.selected_project_name = project_name
+        self.selected_task_id = task_id
         self.refresh_detail_page()
         self.switch_page(PAGE_DETAIL)
 
     def refresh_project_list(self) -> None:
-        """Refresh the left-side project list from current task state."""
+        """Refresh the left-side project list from all known task states."""
         list_view = self.query_one("#project-list", ListView)
         list_view.clear()
-        if self.current_task is None:
-            return
 
-        for project in self.current_task.projects:
-            list_view.append(ListItem(Static(f"{project.project_name} [{project.status.value}]")))
+        for task, project in self._iter_project_states():
+            list_view.append(ListItem(Static(project.project_name)))
 
     def refresh_detail_page(self) -> None:
         """Refresh read-only detail widgets for the selected project."""
@@ -154,27 +195,26 @@ class LaTeXTransTuiApp(App[None]):
         self.query_one("#detail-paths", Static).update(self._project_detail_summary(project))
 
     def refresh_task_table(self) -> None:
-        """Refresh the task management table from current project states."""
+        """Refresh the project management table from all known task states."""
         table = self.query_one("#task-table", DataTable)
         table.clear(columns=True)
-        table.add_columns("项目", "状态", "PDF", "输出目录")
-        if self.current_task is None:
-            return
+        table.add_columns("项目", "状态", "任务 id")
 
-        for project in self.current_task.projects:
+        for task, project in self._iter_project_states():
             table.add_row(
                 project.project_name,
                 project.status.value,
-                project.pdf_path or "",
-                project.output_dir or "",
+                task.task_id,
             )
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle sidebar project selection from the project list."""
-        if event.list_view.id != "project-list" or self.current_task is None:
+        if event.list_view.id != "project-list":
             return
-        if 0 <= event.index < len(self.current_task.projects):
-            self.select_project(self.current_task.projects[event.index].project_name)
+        project_states = list(self._iter_project_states())
+        if 0 <= event.index < len(project_states):
+            task, project = project_states[event.index]
+            self.select_project(project.project_name, task.task_id)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """处理主导航和任务入口按钮。"""
@@ -182,7 +222,7 @@ class LaTeXTransTuiApp(App[None]):
             self.submit_entry_form()
         elif event.button.id == "new-task-button":
             self.switch_page(PAGE_ENTRY)
-        elif event.button.id == "task-manager-button":
+        elif event.button.id in {"project-manager-button", "task-manager-button"}:
             self.switch_page(PAGE_TASKS)
         elif event.button.id == "settings-button":
             self.switch_page(PAGE_CONFIG)
@@ -221,7 +261,9 @@ class LaTeXTransTuiApp(App[None]):
             return
 
         error_widget.update("")
-        self.current_task = TaskViewState(input_type=input_type, inputs=items)
+        self.current_task = TaskViewState(input_type=input_type, inputs=items, task_id=self._next_task_id())
+        self.tasks.append(self.current_task)
+        self.query_one("#event-log", RichLog).clear()
         self.query_one("#progress-summary", Static).update(f"已创建任务：{len(items)} 个条目")
         self.switch_page(PAGE_PROGRESS)
         self.start_current_task()
@@ -233,6 +275,8 @@ class LaTeXTransTuiApp(App[None]):
             return
 
         target_task.apply_event(dict(event))
+        self._replace_history_project(target_task)
+        self._persist_project_event(dict(event), target_task)
         self._refresh_progress_widgets(target_task)
         self.query_one("#event-log", RichLog).write(str(event))
         self.refresh_project_list()
@@ -254,12 +298,109 @@ class LaTeXTransTuiApp(App[None]):
 
     def _selected_project(self) -> ProjectViewState | None:
         """Return the currently selected project state."""
-        if self.current_task is None or self.selected_project_name is None:
+        if self.selected_project_name is None:
             return None
-        for project in self.current_task.projects:
+        for task, project in self._iter_project_states():
+            if self.selected_task_id is not None and task.task_id != self.selected_task_id:
+                continue
             if project.project_name == self.selected_project_name:
                 return project
         return None
+
+    def _iter_project_states(self) -> list[tuple[TaskViewState, ProjectViewState]]:
+        """Return project states flattened across known task history."""
+        tasks = self.tasks
+        if not tasks and self.current_task is not None:
+            tasks = [self.current_task]
+        return [(task, project) for task in tasks for project in task.projects]
+
+    def _next_task_id(self) -> str:
+        """Return the next stable task identifier for a submitted UI task."""
+        return datetime.now().strftime("%Y%m%dT%H%M%S.%f")[:-3]
+
+    def _history_output_root(self) -> Path:
+        """Return the output root used for loading historical projects."""
+        config = load_ui_config(Path.cwd())
+        configured_output = config.get("output_dir", "outputs")
+        return Path(str(configured_output))
+
+    def _merge_history_tasks(
+        self,
+        history_tasks: list[TaskViewState],
+        current_tasks: list[TaskViewState],
+    ) -> list[TaskViewState]:
+        """Merge historical tasks with current in-memory tasks by output directory."""
+        merged = list(history_tasks)
+        for task in current_tasks:
+            for project in task.projects:
+                if project.output_dir:
+                    merged = [
+                        history_task
+                        for history_task in merged
+                        if not any(
+                            history_project.output_dir == project.output_dir
+                            for history_project in history_task.projects
+                        )
+                    ]
+            if task not in merged:
+                merged.append(task)
+        return merged
+
+    def _replace_history_project(self, task: TaskViewState) -> None:
+        """Remove stale historical rows whose output directory is now owned by this task."""
+        output_dirs = {
+            project.output_dir
+            for project in task.projects
+            if project.output_dir
+        }
+        if not output_dirs:
+            return
+        retained_tasks: list[TaskViewState] = []
+        for existing_task in self.tasks:
+            if existing_task is task:
+                retained_tasks.append(existing_task)
+                continue
+            existing_task.projects = [
+                project
+                for project in existing_task.projects
+                if project.output_dir not in output_dirs
+            ]
+            if existing_task.projects:
+                retained_tasks.append(existing_task)
+        if task not in retained_tasks:
+            retained_tasks.append(task)
+        self.tasks = retained_tasks
+
+    def _persist_project_event(self, event: dict[str, object], task: TaskViewState) -> None:
+        """Persist metadata for project events with an output directory."""
+        event_type = event.get("type")
+        if event_type not in {"project_start", "project_complete", "project_error"}:
+            return
+        output_dir = event.get("output_dir")
+        project_name = str(event.get("project_name") or "")
+        if not output_dir or not project_name:
+            return
+        project = next(
+            (item for item in task.projects if item.project_name == project_name),
+            None,
+        )
+        status = project.status if project is not None else ProjectStatus.PENDING
+        input_item = self._input_item_for_project(task, project_name)
+        write_project_metadata(
+            project_dir=Path(str(output_dir)),
+            task_id=task.task_id,
+            input_type=task.input_type,
+            input_item=input_item,
+            project_name=project_name,
+            status=status,
+        )
+
+    def _input_item_for_project(self, task: TaskViewState, project_name: str) -> str:
+        """Return the submitted input item that most likely produced the project."""
+        for item in task.inputs:
+            if Path(item).name == project_name or item == project_name:
+                return item
+        return task.inputs[0] if task.inputs else project_name
 
     def _project_detail_summary(self, project: ProjectViewState) -> str:
         """Build the visible detail summary for project artifacts."""
@@ -297,6 +438,9 @@ class LaTeXTransTuiApp(App[None]):
         project_dir = Path(project.project_dir)
         if not project_dir.exists():
             return None
+
+        if project_dir.is_file() and project_dir.suffix.lower() == ".tex":
+            return project_dir
 
         main_tex = project_dir / "main.tex"
         if main_tex.is_file():
@@ -444,9 +588,13 @@ class LaTeXTransTuiApp(App[None]):
         """Open the entry page."""
         self.switch_page(PAGE_ENTRY)
 
-    def action_task_manager(self) -> None:
-        """Open the task management page."""
+    def action_project_manager(self) -> None:
+        """Open the project management page."""
         self.switch_page(PAGE_TASKS)
+
+    def action_task_manager(self) -> None:
+        """Open the project management page through the legacy binding name."""
+        self.action_project_manager()
 
     def action_settings(self) -> None:
         """Open the configuration page."""

@@ -12,6 +12,7 @@ class ProjectStatus(str, Enum):
 
     PENDING = "pending"
     RUNNING = "running"
+    TERMS_READY = "terms_ready"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -40,6 +41,7 @@ class TaskViewState:
 
     input_type: str
     inputs: list[str]
+    task_id: str = ""
     total: int = 0
     completed: int = 0
     failed: int = 0
