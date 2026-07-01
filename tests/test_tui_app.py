@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from textual.widgets import Button, ContentSwitcher, DataTable, Footer, Input, ListView, ProgressBar, RichLog, Select, Static, TextArea
+from textual.widgets import ContentSwitcher, DataTable, Footer, Input, ListView, ProgressBar, RichLog, Select, Static, TextArea
 
 from setup import load_requirements
 from src.tui.app import (
@@ -384,8 +384,7 @@ class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
             app.query_one("#zotero-library-type-select", Select).value = "group"
             app.query_one("#zotero-item-key-input", Input).value = "ITEM123"
 
-            app.query_one("#import-zotero-button", Button).press()
-            await pilot.pause()
+            app.import_selected_project_to_zotero()
 
             adapter.attach_pdf.assert_called_once_with("ITEM123", r"D:\out\paper.pdf", "42", "group")
             project = app.current_task.projects[0]
@@ -417,14 +416,25 @@ class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
             app.query_one("#zotero-library-type-select", Select).value = "group"
             app.query_one("#zotero-item-key-input", Input).value = "ITEM123"
 
-            app.query_one("#import-zotero-button", Button).press()
-            await pilot.pause()
+            app.import_selected_project_to_zotero()
 
             project = app.current_task.projects[0]
             self.assertEqual(project.status, ProjectStatus.COMPLETED)
             self.assertEqual(app.current_task.completed, 1)
             self.assertIn("失败", project.zotero_status)
             self.assertIn("zotero failed", str(app.query_one("#zotero-status", Static).content))
+
+    async def test_import_zotero_button_branch_calls_import_method(self):
+        """确认 Zotero 按钮分支会同步调用导入方法。"""
+        app = LaTeXTransTuiApp()
+        event = Mock()
+        event.button.id = "import-zotero-button"
+
+        async with app.run_test():
+            with patch.object(app, "import_selected_project_to_zotero") as import_method:
+                app.on_button_pressed(event)
+
+        import_method.assert_called_once_with()
 
 
 if __name__ == "__main__":

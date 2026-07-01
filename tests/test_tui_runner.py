@@ -1,8 +1,8 @@
 """Tests for the TUI runtime runner bridge."""
 
+import os
 import tempfile
 import unittest
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -112,6 +112,67 @@ class TuiRunnerTests(unittest.TestCase):
         self.assertEqual([event["type"] for event in events], ["project_error", "project_complete"])
         self.assertEqual(events[0]["project_name"], r"D:\missing")
         self.assertIn("准备阶段跳过", events[0]["error"])
+
+    def test_run_tui_task_emits_all_prepare_errors_when_prepare_raises(self):
+        """All submitted inputs should get project_error events when prepare raises."""
+        config = {"target_language": "ch", "paper_list": []}
+        events = []
+
+        with patch("src.tui.runner.ensure_ui_config", return_value=Path("config/ui.toml")):
+            with patch("src.tui.runner.runtime.load_runtime_config", return_value=config):
+                with patch(
+                    "src.tui.runner.runtime.prepare_projects",
+                    side_effect=ValueError("No valid TeX projects available for processing."),
+                ):
+                    with patch("src.tui.runner.runtime.run_projects") as run_projects:
+                        with self.assertRaisesRegex(ValueError, "No valid TeX projects"):
+                            run_tui_task(
+                                "config/ui.toml",
+                                "local",
+                                [r"D:\missing-one", r"D:\missing-two"],
+                                {},
+                                events.append,
+                            )
+
+        run_projects.assert_not_called()
+        self.assertEqual([event["type"] for event in events], ["project_error", "project_error"])
+        self.assertEqual([event["project_name"] for event in events], [r"D:\missing-one", r"D:\missing-two"])
+
+    def test_run_tui_task_remote_skip_uses_counts_not_url_names(self):
+        """Remote inputs should not be marked skipped when prepared project names differ."""
+        config = {"target_language": "ch", "paper_list": []}
+        events = []
+
+        with patch("src.tui.runner.ensure_ui_config", return_value=Path("config/ui.toml")):
+            with patch("src.tui.runner.runtime.load_runtime_config", return_value=config):
+                with patch(
+                    "src.tui.runner.runtime.prepare_projects",
+                    return_value=([r"D:\tex-source\renamed-paper"], config, "src", "out"),
+                ):
+                    with patch(
+                        "src.tui.runner.runtime.run_projects",
+                        side_effect=lambda **kwargs: kwargs["event_callback"](
+                            {
+                                "type": "project_complete",
+                                "project_name": "renamed-paper",
+                                "project_dir": r"D:\tex-source\renamed-paper",
+                            }
+                        )
+                        or {"completed_projects": [{"project_name": "renamed-paper"}], "failed_projects": []},
+                    ):
+                        run_tui_task(
+                            "config/ui.toml",
+                            "remote",
+                            [
+                                "https://example.test/original-name.zip",
+                                "https://example.test/missing.zip",
+                            ],
+                            {},
+                            events.append,
+                        )
+
+        self.assertEqual([event["type"] for event in events], ["project_error", "project_complete"])
+        self.assertEqual(events[0]["project_name"], "https://example.test/missing.zip")
 
 
 if __name__ == "__main__":

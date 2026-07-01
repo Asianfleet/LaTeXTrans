@@ -36,13 +36,17 @@ def run_tui_task(
         raise ValueError(f"Unsupported input type: {input_type}")
 
     config = runtime.load_runtime_config(config_path=resolved_config_path, overrides=runtime_overrides)
-    projects, config, projects_dir, output_dir = runtime.prepare_projects(
-        config=config,
-        project_items=project_items,
-        project_url_items=project_url_items,
-        all_existing=False,
-    )
-    _emit_prepare_skip_events(items, projects, event_callback)
+    try:
+        projects, config, projects_dir, output_dir = runtime.prepare_projects(
+            config=config,
+            project_items=project_items,
+            project_url_items=project_url_items,
+            all_existing=False,
+        )
+    except ValueError:
+        _emit_prepare_failure_events(items, event_callback)
+        raise
+    _emit_prepare_skip_events(input_type, items, projects, event_callback)
     project_status = runtime.run_projects(
         config=config,
         projects=projects,
@@ -61,26 +65,40 @@ def run_tui_task(
 
 
 def _emit_prepare_skip_events(
+    input_type: str,
     items: list[str],
     projects: list[str],
     event_callback: TuiEventCallback,
 ) -> None:
     """Emit UI-visible failure events for inputs skipped before runtime processing."""
-    skipped_items = _prepare_skipped_items(items, projects)
+    skipped_items = _prepare_skipped_items(input_type, items, projects)
     for item in skipped_items:
-        event_callback(
-            {
-                "type": "project_error",
-                "project_name": item,
-                "error": f"准备阶段跳过：{item}",
-            }
-        )
+        _emit_prepare_error(item, event_callback)
 
 
-def _prepare_skipped_items(items: list[str], projects: list[str]) -> list[str]:
+def _emit_prepare_failure_events(items: list[str], event_callback: TuiEventCallback) -> None:
+    """Emit UI-visible failure events for every input when prepare fails completely."""
+    for item in items:
+        _emit_prepare_error(item, event_callback)
+
+
+def _emit_prepare_error(item: str, event_callback: TuiEventCallback) -> None:
+    """Emit one UI-visible prepare failure event for a submitted input."""
+    event_callback(
+        {
+            "type": "project_error",
+            "project_name": item,
+            "error": f"准备阶段跳过：{item}",
+        }
+    )
+
+
+def _prepare_skipped_items(input_type: str, items: list[str], projects: list[str]) -> list[str]:
     """Infer which submitted items did not produce prepared project directories."""
     if len(projects) >= len(items):
         return []
+    if input_type == "remote":
+        return items[len(projects) :]
 
     remaining_projects = [str(project) for project in projects]
     skipped: list[str] = []

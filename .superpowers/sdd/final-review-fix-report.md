@@ -215,3 +215,113 @@ OK
 
 - prepare skipped 输入的匹配是 runner 层基于 prepared project 路径名的保守推断；它覆盖本地目录、常见归档名和 URL 文件名场景，但 runtime 当前没有返回精确 skip 列表，因此无法做到完全来源级追踪。
 - Zotero UI 的 API key 输入是最小实现，未持久化到配置文件，也未做异步 worker 化；真实网络请求可能阻塞 UI，后续可独立改为后台 worker。
+
+## Re-review 修复：prepare 全部跳过与 remote skip 稳定性
+
+### 问题 1：all-skipped prepare 抛 `ValueError` 时 undercount
+
+re-review 指出：当 `runtime.prepare_projects()` 因全部输入被跳过而抛出 `ValueError` 时，runner 之前不会运行 `_emit_prepare_skip_events()`，外层 app 只能把异常转成一个 `project_error`，多输入 batch 的进度仍可能卡住。
+
+修复：
+
+- `run_tui_task()` 捕获 `runtime.prepare_projects()` 抛出的 `ValueError`。
+- 捕获后先为所有 submitted items 发出 `project_error`。
+- 随后重抛原始 `ValueError`，保持 UI 仍能展示总体 prepare 错误。
+- 不调用 `runtime.run_projects()`，因为没有 prepared project。
+
+TDD RED：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_runner tests.test_tui_app
+```
+
+关键失败：
+
+```text
+FAIL: test_run_tui_task_emits_all_prepare_errors_when_prepare_raises
+AssertionError: [] != ['project_error', 'project_error']
+```
+
+GREEN：
+
+```text
+Ran 28 tests in 19.989s
+OK
+```
+
+### 问题 2：remote skip 用 URL 名称匹配 prepared path 不稳定
+
+re-review 指出：remote archive 下载后可能重命名，之前用 URL 文件名匹配 prepared project path 会把有效 remote 误报 skipped。
+
+修复：
+
+- `_prepare_skipped_items()` 增加 `input_type` 参数。
+- `input_type == "remote"` 时不再按 URL 字符串匹配 project path。
+- remote 只按数量保守判断：若 `len(projects) < len(items)`，标记末尾超出数量的输入为 skipped。
+- 数量相等时不发 skipped 事件，避免误伤已 prepared 的 remote project。
+
+TDD RED：
+
+```text
+FAIL: test_run_tui_task_remote_skip_uses_counts_not_url_names
+AssertionError: ['project_error', 'project_error', 'project_complete'] != ['project_error', 'project_complete']
+```
+
+GREEN：
+
+```text
+Ran 28 tests in 19.989s
+OK
+```
+
+### 问题 3：Zotero 按钮测试依赖 `Button.press()` 异步消息导致全量脆弱
+
+本地全量测试暴露：`Button.press()` post 的 `Button.Pressed` 消息可能延迟到 app teardown 后才处理，导致 `#zotero-status` 查询 NoMatches。
+
+修复：
+
+- Zotero 成功/失败行为测试改为直接调用 `app.import_selected_project_to_zotero()`，验证同步业务逻辑。
+- 新增 `test_import_zotero_button_branch_calls_import_method`，直接构造带 `button.id` 的简单事件对象调用 `on_button_pressed()`，只验证按钮 ID 分支调用导入方法。
+- 不再用 `Button.press()` 验证同步导入行为，避免 DOM teardown race。
+
+### Re-review 测试结果
+
+聚焦测试：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_runner tests.test_tui_app
+```
+
+结果：
+
+```text
+Ran 28 tests in 19.989s
+OK
+```
+
+全量测试：
+
+```powershell
+conda run -n latextrans python -m unittest discover tests
+```
+
+结果：
+
+```text
+Ran 230 tests in 17.612s
+OK
+```
+
+备注：输出仍包含既有 TerminologyAgent 日志和 Textual 慢 message pump 提示，但退出码为 0。
+
+### Re-review 变更文件
+
+- `src/tui/runner.py`
+  - 捕获 prepare `ValueError` 并为全部 submitted items 发出 `project_error`。
+  - remote skip 推断改为数量匹配。
+- `tests/test_tui_runner.py`
+  - 覆盖 all-skipped prepare `ValueError`。
+  - 覆盖 remote prepared project 重命名时不误报成功输入 skipped。
+- `tests/test_tui_app.py`
+  - 稳定 Zotero 导入测试，避免异步 button message race。
+  - 增加按钮分支同步单元测试。
