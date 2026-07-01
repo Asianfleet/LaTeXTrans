@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import (
@@ -21,7 +22,9 @@ from textual.widgets import (
     TextArea,
 )
 
+from src.tui.config import UI_CONFIG_PATH
 from src.tui.input_parser import parse_input_items, validate_input_items
+from src.tui.runner import run_tui_task
 from src.tui.state import TaskViewState
 
 PAGE_ENTRY = "entry"
@@ -130,6 +133,45 @@ class LaTeXTransTuiApp(App[None]):
         self.current_task = TaskViewState(input_type=input_type, inputs=items)
         self.query_one("#progress-summary", Static).update(f"已创建任务：{len(items)} 个条目")
         self.switch_page(PAGE_PROGRESS)
+        self.start_current_task()
+
+    def handle_runtime_event(self, event: dict[str, object]) -> None:
+        """应用 runtime 事件并刷新进度页控件。"""
+        if self.current_task is None:
+            return
+
+        self.current_task.apply_event(dict(event))
+        summary = (
+            f"总数 {self.current_task.total}，"
+            f"完成 {self.current_task.completed}，"
+            f"失败 {self.current_task.failed}"
+        )
+        self.query_one("#progress-summary", Static).update(summary)
+        self.query_one("#event-log", RichLog).write(str(event))
+
+    def start_current_task(self) -> None:
+        """通过 Textual worker 启动当前任务。"""
+        if self.current_task is None:
+            return
+        self.run_current_task()
+
+    @work(thread=True)
+    def run_current_task(self) -> None:
+        """在后台线程运行当前任务，避免阻塞 Textual UI。"""
+        if self.current_task is None:
+            return
+
+        def callback(event: dict[str, object]) -> None:
+            """把后台 runner 事件转回 Textual UI 线程处理。"""
+            self.call_from_thread(self.handle_runtime_event, event)
+
+        run_tui_task(
+            config_path=str(UI_CONFIG_PATH),
+            input_type=self.current_task.input_type,
+            items=self.current_task.inputs,
+            overrides={},
+            event_callback=callback,
+        )
 
     def action_new_task(self) -> None:
         """Open the entry page."""

@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import patch
 
-from textual.widgets import ContentSwitcher, Footer, ListView, Select, Static, TextArea
+from textual.widgets import ContentSwitcher, Footer, ListView, RichLog, Select, Static, TextArea
 
 from setup import load_requirements
 from src.tui.app import (
@@ -62,11 +63,13 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             app.query_one("#input-type-select", Select).value = "arxiv"
             app.query_one("#batch-input", TextArea).text = "2508.18791\n2407.01648"
 
-            app.submit_entry_form()
+            with patch.object(app, "start_current_task") as start_current_task:
+                app.submit_entry_form()
 
             self.assertIsInstance(app.current_task, TaskViewState)
             self.assertEqual(app.current_task.inputs, ["2508.18791", "2407.01648"])
             self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_PROGRESS)
+            start_current_task.assert_called_once_with()
 
     async def test_start_button_submits_entry_form(self):
         """确认开始按钮会提交入口表单并进入进度页。"""
@@ -75,10 +78,12 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             app.query_one("#input-type-select", Select).value = "arxiv"
             app.query_one("#batch-input", TextArea).text = "2508.18791"
 
-            await pilot.click("#start-task-button")
+            with patch.object(app, "start_current_task") as start_current_task:
+                await pilot.click("#start-task-button")
 
             self.assertIsInstance(app.current_task, TaskViewState)
             self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_PROGRESS)
+            start_current_task.assert_called_once_with()
 
     async def test_submit_entry_form_shows_validation_errors(self):
         """确认无效入口表单会在入口页展示校验错误。"""
@@ -105,6 +110,52 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("请选择输入类型", str(app.query_one("#entry-error", Static).content))
             self.assertIsNone(app.current_task)
             self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_ENTRY)
+
+
+class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
+    """验证任务进度页会响应 runtime 事件。"""
+
+    async def test_handle_runtime_event_updates_task_and_log(self):
+        """确认 runtime 事件会更新当前任务状态并写入日志控件。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test():
+            app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
+
+            app.handle_runtime_event({"type": "run_start", "total": 1})
+            app.handle_runtime_event({"type": "project_start", "project_name": "2508.18791"})
+            app.handle_runtime_event(
+                {"type": "project_complete", "project_name": "2508.18791", "pdf_path": "paper.pdf"}
+            )
+
+            self.assertEqual(app.current_task.completed, 1)
+            self.assertGreaterEqual(len(app.current_task.events), 3)
+            self.assertIsNotNone(app.query_one("#event-log", RichLog))
+
+    async def test_start_current_task_runs_mocked_runner_in_worker(self):
+        """确认启动任务会通过后台 worker 调用 runner 并应用回调事件。"""
+        app = LaTeXTransTuiApp()
+
+        def fake_runner(**kwargs):
+            """模拟 runner 发送完成事件，避免真实下载或翻译。"""
+            kwargs["event_callback"]({"type": "run_start", "total": 1})
+            kwargs["event_callback"](
+                {"type": "project_complete", "project_name": "2508.18791", "pdf_path": "paper.pdf"}
+            )
+            return {"completed_projects": ["2508.18791"], "failed_projects": []}
+
+        async with app.run_test() as pilot:
+            app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
+
+            with patch("src.tui.app.run_tui_task", side_effect=fake_runner) as runner:
+                app.start_current_task()
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+
+            runner.assert_called_once()
+            call_kwargs = runner.call_args.kwargs
+            self.assertEqual(call_kwargs["input_type"], "arxiv")
+            self.assertEqual(call_kwargs["items"], ["2508.18791"])
+            self.assertEqual(app.current_task.completed, 1)
 
 
 if __name__ == "__main__":
