@@ -114,6 +114,29 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_ENTRY)
 
 
+class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
+    """验证配置页会加载、编辑并保存 UI 配置。"""
+
+    async def test_load_config_page_writes_toml_preview(self):
+        """确认配置页加载会把 UI 配置写入 TOML 预览区。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test():
+            with patch("src.tui.app.load_ui_config", return_value={"target_language": "ja"}):
+                app.load_config_page()
+
+            self.assertIn("target_language", app.query_one("#config-preview", TextArea).text)
+
+    async def test_save_config_page_persists_preview_toml(self):
+        """确认配置页保存会解析预览区 TOML 并写入 UI 配置文件。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test():
+            app.query_one("#config-preview", TextArea).text = 'target_language = "fr"\n'
+            with patch("src.tui.app.save_ui_config") as save_config:
+                app.save_config_page()
+
+            self.assertEqual(save_config.call_args.args[1]["target_language"], "fr")
+
+
 class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
     """验证任务进度页会响应 runtime 事件。"""
 

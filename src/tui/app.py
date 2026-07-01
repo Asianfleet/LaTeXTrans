@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import toml
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -25,7 +26,7 @@ from textual.widgets import (
     TextArea,
 )
 
-from src.tui.config import UI_CONFIG_PATH
+from src.tui.config import UI_CONFIG_PATH, load_ui_config, save_ui_config
 from src.tui.input_parser import parse_input_items, validate_input_items
 from src.tui.runner import run_tui_task
 from src.tui.state import ProjectViewState, TaskViewState
@@ -167,6 +168,21 @@ class LaTeXTransTuiApp(App[None]):
             self.switch_page(PAGE_TASKS)
         elif event.button.id == "settings-button":
             self.switch_page(PAGE_CONFIG)
+        elif event.button.id == "save-config-button":
+            self.save_config_page()
+        elif event.button.id == "reload-config-button":
+            self.load_config_page()
+
+    def load_config_page(self) -> None:
+        """将 UI 配置加载到配置页 TOML 预览区。"""
+        config = load_ui_config(Path.cwd())
+        self.query_one("#config-preview", TextArea).text = toml.dumps(config)
+
+    def save_config_page(self) -> None:
+        """解析配置页 TOML 预览区内容并保存 UI 配置。"""
+        config_text = self.query_one("#config-preview", TextArea).text
+        config = toml.loads(config_text)
+        save_ui_config(Path.cwd(), config)
 
     def submit_entry_form(self) -> None:
         """校验入口页表单并创建任务视图状态。"""
