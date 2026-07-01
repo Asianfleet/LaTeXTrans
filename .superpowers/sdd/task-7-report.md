@@ -47,3 +47,14 @@
 
 - Textual 当前版本的 `Static` 没有 `renderable` 属性，brief 示例断言不可用；已基于 Context7 和本地 API 改用 `Static.content`。
 - `current_task` 是类属性标注，赋值后会成为实例属性；这符合当前测试和任务需求，但后续若并行运行多个 App 实例，可考虑在初始化生命周期中显式设置实例属性。
+
+## 复审 Important 修复
+
+- 问题：Textual `Select` 处于 blank state 时，`value` 是 `Select.NULL`；原代码直接 `str(value)`，导致未选择输入类型但已输入文本时显示 `unsupported input type: Select.NULL`。
+- 文档证据：已运行 `npx ctx7@latest docs /textualize/textual "Select blank state NULL is_blank selection value current API"`，官方文档确认 blank state 的值为 `Select.NULL`，并推荐 `Select.is_blank()` 和 `Select.clear()` 处理该状态。
+- 本地 API 证据：已运行 `conda run -n latextrans python -c "from textual.widgets import Select; print(hasattr(Select, 'NULL')); print(hasattr(Select, 'is_blank')); print(Select.NULL)"`，确认当前安装版本支持 `Select.NULL` 和 `Select.is_blank()`。
+- RED：新增 `test_submit_entry_form_requires_input_type_when_select_is_blank` 后运行 `conda run -n latextrans python -m unittest tests.test_tui_app.TuiEntryPageTests.test_submit_entry_form_requires_input_type_when_select_is_blank`，结果失败，实际错误文本为 `unsupported input type: Select.NULL`。
+- GREEN：改为通过 `input_type_select.is_blank()` 将 blank state 归一为空输入类型，并运行 `conda run -n latextrans python -m unittest tests.test_tui_app`。
+- 测试结果：8 个测试全部通过。
+- 补强：`test_submit_entry_form_shows_validation_errors` 现在断言校验失败时 `current_task is None`，且页面仍停留在 `PAGE_ENTRY`。
+- 范围：本次修复仅修改 `src/tui/app.py`、`tests/test_tui_app.py` 和本报告；未实现 Task 8+。

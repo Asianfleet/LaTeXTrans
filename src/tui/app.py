@@ -112,7 +112,8 @@ class LaTeXTransTuiApp(App[None]):
 
     def submit_entry_form(self) -> None:
         """校验入口页表单并创建任务视图状态。"""
-        input_type = str(self.query_one("#input-type-select", Select).value or "")
+        input_type_select = self.query_one("#input-type-select", Select)
+        input_type = "" if input_type_select.is_blank() else str(input_type_select.value)
         input_text = self.query_one("#batch-input", TextArea).text
         items = parse_input_items(input_type, input_text)
         errors = validate_input_items(input_type, items)

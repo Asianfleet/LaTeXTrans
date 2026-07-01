@@ -90,6 +90,21 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             app.submit_entry_form()
 
             self.assertIn("remote input must be", str(app.query_one("#entry-error", Static).content))
+            self.assertIsNone(app.current_task)
+            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_ENTRY)
+
+    async def test_submit_entry_form_requires_input_type_when_select_is_blank(self):
+        """确认输入类型为空但文本非空时提示选择输入类型且不创建任务。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test():
+            app.query_one("#input-type-select", Select).clear()
+            app.query_one("#batch-input", TextArea).text = "2508.18791"
+
+            app.submit_entry_form()
+
+            self.assertIn("请选择输入类型", str(app.query_one("#entry-error", Static).content))
+            self.assertIsNone(app.current_task)
+            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_ENTRY)
 
 
 if __name__ == "__main__":
