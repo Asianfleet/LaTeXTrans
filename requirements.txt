@@ -11,3 +11,4 @@ async-lru==2.0.5
 async-timeout==5.0.1
 pandas==2.2.3
 datetime
+textual>=0.86.0
