@@ -1,9 +1,9 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from textual.widgets import ContentSwitcher, DataTable, Footer, ListView, ProgressBar, RichLog, Select, Static, TextArea
+from textual.widgets import Button, ContentSwitcher, DataTable, Footer, Input, ListView, ProgressBar, RichLog, Select, Static, TextArea
 
 from setup import load_requirements
 from src.tui.app import (
@@ -319,6 +319,112 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(errors_table.row_count, 1)
                 self.assertEqual(errors_table.get_cell_at((0, 0)), str(project_dir / "errors.md"))
                 self.assertEqual(errors_table.get_cell_at((0, 1)), "compile failed")
+
+    async def test_refresh_detail_page_populates_terms_table(self):
+        """确认详情页会从项目状态中的术语表路径渲染术语行和路径。"""
+        app = LaTeXTransTuiApp()
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            terms_path = project_dir / "project_terms.csv"
+            decisions_path = project_dir / "project_terms_decisions.json"
+            terms_path.write_text(
+                "Source Term,Target Translation\nGraph,图\nModel,模型\n",
+                encoding="utf-8",
+            )
+            decisions_path.write_text('{"decisions": []}', encoding="utf-8")
+
+            async with app.run_test():
+                app.current_task = TaskViewState(input_type="local", inputs=[str(project_dir)])
+                app.current_task.projects.append(
+                    ProjectViewState(
+                        project_name="paper",
+                        status=ProjectStatus.COMPLETED,
+                        project_terms_path=str(terms_path),
+                        project_terms_decisions_path=str(decisions_path),
+                    )
+                )
+                app.selected_project_name = "paper"
+
+                app.refresh_detail_page()
+
+                terms_table = app.query_one("#terms-table", DataTable)
+                self.assertEqual(terms_table.row_count, 4)
+                self.assertEqual(terms_table.get_cell_at((0, 0)), "术语表路径")
+                self.assertEqual(terms_table.get_cell_at((0, 1)), str(terms_path))
+                self.assertEqual(terms_table.get_cell_at((1, 0)), "决策记录路径")
+                self.assertEqual(terms_table.get_cell_at((1, 1)), str(decisions_path))
+                self.assertEqual(terms_table.get_cell_at((2, 0)), "Graph")
+                self.assertEqual(terms_table.get_cell_at((2, 1)), "图")
+
+
+class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
+    """验证 Zotero 导入按钮只对选中项目的 PDF 调用 adapter 并反馈状态。"""
+
+    async def test_import_zotero_button_attaches_selected_project_pdf(self):
+        """确认导入 Zotero 按钮会用显式条目信息附加当前项目 PDF。"""
+        app = LaTeXTransTuiApp()
+        adapter = Mock()
+        adapter.attach_pdf.return_value = {"attachment_key": "ATTACH1", "status": "uploaded"}
+
+        async with app.run_test() as pilot:
+            app.zotero_adapter_factory = lambda api_key, script_path: adapter
+            app.current_task = TaskViewState(input_type="local", inputs=["paper"])
+            app.current_task.projects.append(
+                ProjectViewState(
+                    project_name="paper",
+                    status=ProjectStatus.COMPLETED,
+                    pdf_path=r"D:\out\paper.pdf",
+                )
+            )
+            app.selected_project_name = "paper"
+            app.switch_page(PAGE_DETAIL)
+            app.query_one("#zotero-api-key-input", Input).value = "ui-key"
+            app.query_one("#zotero-script-path-input", Input).value = "zotero.py"
+            app.query_one("#zotero-library-id-input", Input).value = "42"
+            app.query_one("#zotero-library-type-select", Select).value = "group"
+            app.query_one("#zotero-item-key-input", Input).value = "ITEM123"
+
+            app.query_one("#import-zotero-button", Button).press()
+            await pilot.pause()
+
+            adapter.attach_pdf.assert_called_once_with("ITEM123", r"D:\out\paper.pdf", "42", "group")
+            project = app.current_task.projects[0]
+            self.assertEqual(project.zotero_status, "uploaded: ATTACH1")
+            self.assertIn("uploaded", str(app.query_one("#zotero-status", Static).content))
+
+    async def test_import_zotero_button_reports_failure_without_changing_task_result(self):
+        """确认 Zotero 导入失败会展示错误，但不改变翻译完成状态。"""
+        app = LaTeXTransTuiApp()
+        adapter = Mock()
+        adapter.attach_pdf.side_effect = RuntimeError("zotero failed")
+
+        async with app.run_test() as pilot:
+            app.zotero_adapter_factory = lambda api_key, script_path: adapter
+            app.current_task = TaskViewState(input_type="local", inputs=["paper"])
+            app.current_task.projects.append(
+                ProjectViewState(
+                    project_name="paper",
+                    status=ProjectStatus.COMPLETED,
+                    pdf_path=r"D:\out\paper.pdf",
+                )
+            )
+            app.current_task.completed = 1
+            app.selected_project_name = "paper"
+            app.switch_page(PAGE_DETAIL)
+            app.query_one("#zotero-api-key-input", Input).value = "ui-key"
+            app.query_one("#zotero-script-path-input", Input).value = "zotero.py"
+            app.query_one("#zotero-library-id-input", Input).value = "42"
+            app.query_one("#zotero-library-type-select", Select).value = "group"
+            app.query_one("#zotero-item-key-input", Input).value = "ITEM123"
+
+            app.query_one("#import-zotero-button", Button).press()
+            await pilot.pause()
+
+            project = app.current_task.projects[0]
+            self.assertEqual(project.status, ProjectStatus.COMPLETED)
+            self.assertEqual(app.current_task.completed, 1)
+            self.assertIn("失败", project.zotero_status)
+            self.assertIn("zotero failed", str(app.query_one("#zotero-status", Static).content))
 
 
 if __name__ == "__main__":

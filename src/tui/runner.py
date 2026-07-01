@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable
 
 from src import runtime
+from src.tui.config import ensure_ui_config
 
 TuiEventCallback = Callable[[dict[str, Any]], None]
 
@@ -17,6 +19,7 @@ def run_tui_task(
     event_callback: TuiEventCallback,
 ) -> dict[str, Any]:
     """Run a UI-submitted translation task through the existing runtime."""
+    resolved_config_path = str(ensure_ui_config(Path.cwd()))
     runtime_overrides = dict(overrides)
     project_items: list[str] = []
     project_url_items: list[str] = []
@@ -32,13 +35,14 @@ def run_tui_task(
     else:
         raise ValueError(f"Unsupported input type: {input_type}")
 
-    config = runtime.load_runtime_config(config_path=config_path, overrides=runtime_overrides)
+    config = runtime.load_runtime_config(config_path=resolved_config_path, overrides=runtime_overrides)
     projects, config, projects_dir, output_dir = runtime.prepare_projects(
         config=config,
         project_items=project_items,
         project_url_items=project_url_items,
         all_existing=False,
     )
+    _emit_prepare_skip_events(items, projects, event_callback)
     project_status = runtime.run_projects(
         config=config,
         projects=projects,
@@ -54,3 +58,62 @@ def run_tui_task(
         "completed_projects": project_status["completed_projects"],
         "failed_projects": project_status["failed_projects"],
     }
+
+
+def _emit_prepare_skip_events(
+    items: list[str],
+    projects: list[str],
+    event_callback: TuiEventCallback,
+) -> None:
+    """Emit UI-visible failure events for inputs skipped before runtime processing."""
+    skipped_items = _prepare_skipped_items(items, projects)
+    for item in skipped_items:
+        event_callback(
+            {
+                "type": "project_error",
+                "project_name": item,
+                "error": f"准备阶段跳过：{item}",
+            }
+        )
+
+
+def _prepare_skipped_items(items: list[str], projects: list[str]) -> list[str]:
+    """Infer which submitted items did not produce prepared project directories."""
+    if len(projects) >= len(items):
+        return []
+
+    remaining_projects = [str(project) for project in projects]
+    skipped: list[str] = []
+    for item in items:
+        matched_index = _matching_project_index(item, remaining_projects)
+        if matched_index is None:
+            skipped.append(item)
+            continue
+        remaining_projects.pop(matched_index)
+    return skipped
+
+
+def _matching_project_index(item: str, projects: list[str]) -> int | None:
+    """Return the index of the prepared project that corresponds to an input item."""
+    item_path = Path(item)
+    item_name = item_path.name
+    item_stem = _archive_stem(item_name)
+    for index, project in enumerate(projects):
+        project_path = Path(project)
+        if project_path.name in {item_name, item_stem}:
+            return index
+        try:
+            if item_path.exists() and item_path.resolve() == project_path.resolve():
+                return index
+        except OSError:
+            continue
+    return None
+
+
+def _archive_stem(name: str) -> str:
+    """Return the directory stem produced by archive extraction."""
+    lower_name = name.lower()
+    for suffix in (".tar.gz", ".tgz", ".tar", ".zip"):
+        if lower_name.endswith(suffix):
+            return name[: -len(suffix)]
+    return Path(name).stem

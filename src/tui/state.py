@@ -26,6 +26,8 @@ class ProjectViewState:
     output_dir: str | None = None
     pdf_path: str | None = None
     errors_report_path: str | None = None
+    project_terms_path: str | None = None
+    project_terms_decisions_path: str | None = None
     log_path: str | None = None
     validation_summary: dict[str, Any] | None = None
     error: str | None = None
@@ -84,6 +86,8 @@ class TaskViewState:
             "output_dir",
             "pdf_path",
             "errors_report_path",
+            "project_terms_path",
+            "project_terms_decisions_path",
             "log_path",
             "validation_summary",
             "error",

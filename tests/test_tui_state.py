@@ -46,6 +46,24 @@ class TuiStateTests(unittest.TestCase):
         self.assertEqual(state.projects[0].status, ProjectStatus.COMPLETED)
         self.assertEqual(state.projects[0].pdf_path, r"D:\out\ch_2508.18791.pdf")
 
+    def test_project_lifecycle_events_copy_terms_paths(self):
+        """Project lifecycle events should preserve generated terminology paths."""
+        state = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
+        state.apply_event(
+            {
+                "type": "project_complete",
+                "project_name": "2508.18791",
+                "project_terms_path": r"D:\out\project_terms.csv",
+                "project_terms_decisions_path": r"D:\out\project_terms_decisions.json",
+            }
+        )
+
+        self.assertEqual(state.projects[0].project_terms_path, r"D:\out\project_terms.csv")
+        self.assertEqual(
+            state.projects[0].project_terms_decisions_path,
+            r"D:\out\project_terms_decisions.json",
+        )
+
     def test_project_error_updates_failed_count(self):
         """project_error events should mark failed projects and count them."""
         state = TaskViewState(input_type="remote", inputs=["https://example.test/paper.zip"])

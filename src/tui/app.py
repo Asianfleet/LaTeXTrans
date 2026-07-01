@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import sys
 from pathlib import Path
 
 import toml
@@ -30,6 +32,7 @@ from src.tui.config import UI_CONFIG_PATH, load_ui_config, save_ui_config
 from src.tui.input_parser import parse_input_items, validate_input_items
 from src.tui.runner import run_tui_task
 from src.tui.state import ProjectViewState, TaskViewState
+from src.tui.zotero_adapter import ZoteroAdapter
 
 PAGE_ENTRY = "entry"
 PAGE_PROGRESS = "progress"
@@ -43,6 +46,13 @@ class LaTeXTransTuiApp(App[None]):
 
     current_task: TaskViewState | None = None
     selected_project_name: str | None = None
+    zotero_adapter_factory = staticmethod(
+        lambda api_key, script_path: ZoteroAdapter(
+            python_cmd=[sys.executable],
+            script_path=script_path,
+            api_key=api_key,
+        )
+    )
 
     BINDINGS = [
         ("q", "quit", "退出"),
@@ -91,6 +101,12 @@ class LaTeXTransTuiApp(App[None]):
                             yield Static("", id="project-log-summary")
                             yield RichLog(id="project-log")
                     yield Static("", id="detail-paths")
+                    yield Input(id="zotero-api-key-input", password=True)
+                    yield Input(id="zotero-script-path-input")
+                    yield Input(id="zotero-library-id-input")
+                    yield Select([("用户库", "user"), ("群组库", "group")], id="zotero-library-type-select")
+                    yield Input(id="zotero-item-key-input")
+                    yield Static("", id="zotero-status")
                     yield Button("打开输出目录", id="open-output-button")
                     yield Button("导入 Zotero", id="import-zotero-button")
                 with Vertical(id=PAGE_TASKS):
@@ -133,6 +149,8 @@ class LaTeXTransTuiApp(App[None]):
         self._refresh_tex_preview(project)
         self._refresh_project_log(project)
         self._refresh_errors_table(project)
+        self._refresh_terms_table(project)
+        self.query_one("#zotero-status", Static).update(project.zotero_status)
         self.query_one("#detail-paths", Static).update(self._project_detail_summary(project))
 
     def refresh_task_table(self) -> None:
@@ -172,6 +190,8 @@ class LaTeXTransTuiApp(App[None]):
             self.save_config_page()
         elif event.button.id == "reload-config-button":
             self.load_config_page()
+        elif event.button.id == "import-zotero-button":
+            self.import_selected_project_to_zotero()
 
     def load_config_page(self) -> None:
         """将 UI 配置加载到配置页 TOML 预览区。"""
@@ -311,6 +331,77 @@ class LaTeXTransTuiApp(App[None]):
         if project.errors_report_path is None and project.error is None:
             return
         table.add_row(project.errors_report_path or "", project.error or "")
+
+    def _refresh_terms_table(self, project: ProjectViewState) -> None:
+        """Refresh the selected project's read-only terminology table."""
+        table = self.query_one("#terms-table", DataTable)
+        table.clear(columns=True)
+        table.add_columns("字段", "值")
+        if project.project_terms_path:
+            table.add_row("术语表路径", project.project_terms_path)
+        if project.project_terms_decisions_path:
+            table.add_row("决策记录路径", project.project_terms_decisions_path)
+        if not project.project_terms_path:
+            return
+
+        terms_path = Path(project.project_terms_path)
+        try:
+            with terms_path.open("r", encoding="utf-8", newline="") as terms_file:
+                rows = list(csv.reader(terms_file))
+        except OSError as exc:
+            table.add_row("术语表读取错误", str(exc))
+            return
+
+        for row in rows[1:]:
+            if len(row) >= 2:
+                table.add_row(row[0], row[1])
+
+    def import_selected_project_to_zotero(self) -> None:
+        """Attach the selected project's translated PDF to an explicit Zotero item."""
+        project = self._selected_project()
+        status_widget = self.query_one("#zotero-status", Static)
+        if project is None:
+            status_widget.update("请选择一个项目。")
+            return
+        if not project.pdf_path:
+            project.zotero_status = "失败：当前项目没有 PDF。"
+            status_widget.update(project.zotero_status)
+            return
+
+        api_key = self.query_one("#zotero-api-key-input", Input).value.strip()
+        script_path = self.query_one("#zotero-script-path-input", Input).value.strip()
+        library_id = self.query_one("#zotero-library-id-input", Input).value.strip()
+        library_type_select = self.query_one("#zotero-library-type-select", Select)
+        library_type = "" if library_type_select.is_blank() else str(library_type_select.value)
+        item_key = self.query_one("#zotero-item-key-input", Input).value.strip()
+        missing_fields = [
+            field_name
+            for field_name, field_value in (
+                ("API key", api_key),
+                ("adapter script", script_path),
+                ("library_id", library_id),
+                ("library_type", library_type),
+                ("item_key", item_key),
+            )
+            if not field_value
+        ]
+        if missing_fields:
+            project.zotero_status = f"失败：缺少 {', '.join(missing_fields)}。"
+            status_widget.update(project.zotero_status)
+            return
+
+        try:
+            adapter = self.zotero_adapter_factory(api_key, script_path)
+            result = adapter.attach_pdf(item_key, project.pdf_path, library_id, library_type)
+        except Exception as exc:
+            project.zotero_status = f"失败：{exc}"
+            status_widget.update(project.zotero_status)
+            return
+
+        attachment_key = result.get("attachment_key", "")
+        upload_status = result.get("status", "uploaded")
+        project.zotero_status = f"{upload_status}: {attachment_key}".strip()
+        status_widget.update(project.zotero_status)
 
     def start_current_task(self) -> None:
         """通过 Textual worker 启动当前任务。"""
