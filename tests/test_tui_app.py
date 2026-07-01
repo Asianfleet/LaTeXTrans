@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from textual.widgets import ContentSwitcher, Footer, ListView, RichLog, Select, Static, TextArea
+from textual.widgets import ContentSwitcher, Footer, ListView, ProgressBar, RichLog, Select, Static, TextArea
 
 from setup import load_requirements
 from src.tui.app import (
@@ -129,15 +129,17 @@ class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(app.current_task.completed, 1)
             self.assertGreaterEqual(len(app.current_task.events), 3)
+            progress_bar = app.query_one("#task-progress", ProgressBar)
+            self.assertEqual(progress_bar.total, 1)
+            self.assertEqual(progress_bar.progress, 1)
             self.assertIsNotNone(app.query_one("#event-log", RichLog))
 
-    async def test_start_current_task_runs_mocked_runner_in_worker(self):
-        """确认启动任务会通过后台 worker 调用 runner 并应用回调事件。"""
+    async def test_start_current_task_initializes_total_without_run_start(self):
+        """确认真实启动路径不依赖 runner 发送 run_start 也会初始化总数。"""
         app = LaTeXTransTuiApp()
 
         def fake_runner(**kwargs):
-            """模拟 runner 发送完成事件，避免真实下载或翻译。"""
-            kwargs["event_callback"]({"type": "run_start", "total": 1})
+            """模拟 runner 只发送项目完成事件，避免真实下载或翻译。"""
             kwargs["event_callback"](
                 {"type": "project_complete", "project_name": "2508.18791", "pdf_path": "paper.pdf"}
             )
@@ -156,6 +158,50 @@ class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call_kwargs["input_type"], "arxiv")
             self.assertEqual(call_kwargs["items"], ["2508.18791"])
             self.assertEqual(app.current_task.completed, 1)
+            progress_bar = app.query_one("#task-progress", ProgressBar)
+            self.assertEqual(app.current_task.total, 1)
+            self.assertEqual(progress_bar.total, 1)
+            self.assertEqual(progress_bar.progress, 1)
+
+    async def test_stale_worker_events_do_not_update_new_current_task(self):
+        """确认旧任务 worker 回调不会污染新的 current_task。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test():
+            old_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"], total=1)
+            new_task = TaskViewState(input_type="arxiv", inputs=["2407.01648"], total=1)
+            app.current_task = old_task
+            app.current_task = new_task
+
+            app.handle_runtime_event(
+                {"type": "project_complete", "project_name": "2508.18791", "pdf_path": "old.pdf"},
+                old_task,
+            )
+
+            self.assertEqual(old_task.completed, 0)
+            self.assertEqual(new_task.completed, 0)
+            self.assertEqual(new_task.events, [])
+
+    async def test_worker_exception_is_reported_in_current_task(self):
+        """确认 runner 异常会转成当前任务的可见失败事件。"""
+        app = LaTeXTransTuiApp()
+
+        def failing_runner(**kwargs):
+            """模拟 runner 抛出异常，避免真实下载或翻译。"""
+            raise RuntimeError("runner failed")
+
+        async with app.run_test() as pilot:
+            app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
+
+            with patch("src.tui.app.run_tui_task", side_effect=failing_runner):
+                app.start_current_task()
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+
+            self.assertEqual(app.current_task.failed, 1)
+            self.assertEqual(app.current_task.total, 1)
+            self.assertIn("runner failed", str(app.query_one("#progress-summary", Static).content))
+            self.assertEqual(app.query_one("#task-progress", ProgressBar).progress, 1)
+            self.assertTrue(any("runner failed" in str(event) for event in app.current_task.events))
 
 
 if __name__ == "__main__":

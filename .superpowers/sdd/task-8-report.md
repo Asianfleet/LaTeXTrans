@@ -64,3 +64,45 @@
 
 - Context7 当前文档示例给出 `from textual.work import work`，但本项目 conda 环境的 Textual 8.2.8 不存在该子模块；实现采用 `from textual import work` 以保证本环境测试可运行。
 - Textual `run_test()` 在本环境会输出 slow-task 诊断行，但测试退出码为 0，未观察到功能性失败。
+
+## 复审修复追加
+
+### 复审反馈核对
+
+- 重新执行：`npx ctx7@latest docs /textualize/textual "ProgressBar update total progress advance current API worker exclusive thread work decorator"`。
+- 文档要点：Textual worker 支持 `@work(..., exclusive=True)`，线程 worker 继续使用 `thread=True`，跨线程 UI 更新继续使用 `call_from_thread()`。
+- 本地 API 核对：`ProgressBar.update(self, *, total=..., progress=..., advance=...)`，`ProgressBar.advance(self, advance=1)`；`work(..., exclusive=False, thread=False)` 支持同时传入 `exclusive=True` 和 `thread=True`。
+
+### RED 证据
+
+- 先补测试覆盖四个复审项：
+  - 无 runner `run_start` 时启动路径仍初始化 `TaskViewState.total`。
+  - `ProgressBar.total` 和 `ProgressBar.progress` 随完成/失败更新。
+  - 旧任务绑定事件不会污染新的 `current_task`。
+  - runner 抛异常会转为 UI 可见失败事件。
+- 执行：`conda run -n latextrans python -m unittest tests.test_tui_app`
+- 失败证据：
+  - `ProgressBar.total` 为 `None`。
+  - 启动后 `TaskViewState.total` 仍为 `0`。
+  - `handle_runtime_event()` 不接受绑定任务参数。
+  - runner 异常冒泡为 `textual.worker.WorkerFailed`。
+
+### GREEN 证据
+
+- 修复：
+  - `start_current_task()` 基于 `len(task.inputs)` 初始化总数并刷新进度。
+  - `handle_runtime_event(event, task=None)` 绑定启动时的 `TaskViewState`，旧任务事件被忽略。
+  - `ProgressBar.update(total=task.total, progress=completed + failed)` 展示进度。
+  - `@work(thread=True, exclusive=True)` 防止同组重复 worker 并保留线程运行。
+  - 捕获 `run_tui_task()` 异常，通过 `call_from_thread()` 发送 `project_error` 事件，摘要和日志显示错误。
+- 执行：`conda run -n latextrans python -m unittest tests.test_tui_app`
+- 结果：`Ran 12 tests ... OK`。
+- 执行：`conda run -n latextrans python -m unittest discover tests`
+- 结果：`Ran 210 tests ... OK`。输出包含既有 `TerminologyAgent` 日志和 Textual slow-task 诊断行。
+
+### 复审后自审
+
+- 修复范围仍限于 `src/tui/app.py`、`tests/test_tui_app.py`、`.superpowers/sdd/task-8-report.md`。
+- 未修改 state/runner。
+- runner 相关测试继续使用 mock，不执行真实下载或翻译。
+- 未修改 `.superpowers/sdd/progress.md`。

@@ -135,43 +135,64 @@ class LaTeXTransTuiApp(App[None]):
         self.switch_page(PAGE_PROGRESS)
         self.start_current_task()
 
-    def handle_runtime_event(self, event: dict[str, object]) -> None:
+    def handle_runtime_event(self, event: dict[str, object], task: TaskViewState | None = None) -> None:
         """应用 runtime 事件并刷新进度页控件。"""
-        if self.current_task is None:
+        target_task = task or self.current_task
+        if target_task is None or target_task is not self.current_task:
             return
 
-        self.current_task.apply_event(dict(event))
-        summary = (
-            f"总数 {self.current_task.total}，"
-            f"完成 {self.current_task.completed}，"
-            f"失败 {self.current_task.failed}"
-        )
-        self.query_one("#progress-summary", Static).update(summary)
+        target_task.apply_event(dict(event))
+        self._refresh_progress_widgets(target_task)
         self.query_one("#event-log", RichLog).write(str(event))
+
+    def _refresh_progress_widgets(self, task: TaskViewState) -> None:
+        """根据任务状态刷新摘要和进度条。"""
+        finished = task.completed + task.failed
+        summary = (
+            f"总数 {task.total}，"
+            f"完成 {task.completed}，"
+            f"失败 {task.failed}"
+        )
+        last_error = next((event.get("error") for event in reversed(task.events) if event.get("error")), None)
+        if last_error:
+            summary = f"{summary}，错误 {last_error}"
+        self.query_one("#progress-summary", Static).update(summary)
+        self.query_one("#task-progress", ProgressBar).update(total=task.total, progress=finished)
 
     def start_current_task(self) -> None:
         """通过 Textual worker 启动当前任务。"""
         if self.current_task is None:
             return
-        self.run_current_task()
+        task = self.current_task
+        task.total = len(task.inputs)
+        self._refresh_progress_widgets(task)
+        self.run_current_task(task)
 
-    @work(thread=True)
-    def run_current_task(self) -> None:
+    @work(thread=True, exclusive=True)
+    def run_current_task(self, task: TaskViewState) -> None:
         """在后台线程运行当前任务，避免阻塞 Textual UI。"""
-        if self.current_task is None:
+        if task is not self.current_task:
             return
 
         def callback(event: dict[str, object]) -> None:
             """把后台 runner 事件转回 Textual UI 线程处理。"""
-            self.call_from_thread(self.handle_runtime_event, event)
+            self.call_from_thread(self.handle_runtime_event, event, task)
 
-        run_tui_task(
-            config_path=str(UI_CONFIG_PATH),
-            input_type=self.current_task.input_type,
-            items=self.current_task.inputs,
-            overrides={},
-            event_callback=callback,
-        )
+        try:
+            run_tui_task(
+                config_path=str(UI_CONFIG_PATH),
+                input_type=task.input_type,
+                items=task.inputs,
+                overrides={},
+                event_callback=callback,
+            )
+        except Exception as exc:
+            project_name = task.running_project or (task.inputs[0] if task.inputs else "task")
+            self.call_from_thread(
+                self.handle_runtime_event,
+                {"type": "project_error", "project_name": project_name, "error": str(exc)},
+                task,
+            )
 
     def action_new_task(self) -> None:
         """Open the entry page."""
