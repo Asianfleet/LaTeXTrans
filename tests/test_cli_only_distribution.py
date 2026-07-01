@@ -8,6 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 class CliOnlyDistributionTests(unittest.TestCase):
     def test_package_exposes_expected_cli_entry_points(self):
+        """确认发行包暴露原 CLI 和新增 TUI 入口。"""
         setup_tree = ast.parse((PROJECT_ROOT / "setup.py").read_text(encoding="utf-8"))
         setup_call = next(
             node

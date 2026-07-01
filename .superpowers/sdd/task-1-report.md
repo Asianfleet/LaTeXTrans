@@ -128,3 +128,24 @@ OK
 
 - 无阻塞顾虑。
 - 注意：为使 `from setup import load_requirements` 的测试导入稳定，`setup.py` 的 `setup()` 调用被移动到 `if __name__ == "__main__":` 下。这是测试可导入 helper 的必要包装修正。
+
+## 复审修复
+
+Important 复审指出新增测试类和测试方法缺少 docstring，违反全局约束。已做最小修复：
+
+- 为 `tests/test_tui_app.py` 中新增的 `TuiPackagingTests` 类补充 docstring。
+- 为 `tests/test_tui_app.py` 中两个新增测试方法补充 docstring。
+- 为 `tests/test_cli_only_distribution.py` 中本任务重命名并触及的 `test_package_exposes_expected_cli_entry_points` 方法补充 docstring。
+
+复审修复后运行：
+
+```powershell
+conda run -n latextrans python -m unittest tests.test_tui_app.TuiPackagingTests tests.test_cli_only_distribution
+```
+
+结果：
+
+```text
+Ran 5 tests in 0.224s
+OK
+```
