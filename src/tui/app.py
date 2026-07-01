@@ -21,6 +21,9 @@ from textual.widgets import (
     TextArea,
 )
 
+from src.tui.input_parser import parse_input_items, validate_input_items
+from src.tui.state import TaskViewState
+
 PAGE_ENTRY = "entry"
 PAGE_PROGRESS = "progress"
 PAGE_DETAIL = "detail"
@@ -30,6 +33,8 @@ PAGE_CONFIG = "config"
 
 class LaTeXTransTuiApp(App[None]):
     """Main Textual application for LaTeXTransPlus."""
+
+    current_task: TaskViewState | None = None
 
     BINDINGS = [
         ("q", "quit", "退出"),
@@ -93,6 +98,37 @@ class LaTeXTransTuiApp(App[None]):
     def switch_page(self, page_id: str) -> None:
         """Switch the right-side content area to the given page."""
         self.query_one("#main-switcher", ContentSwitcher).current = page_id
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """处理主导航和任务入口按钮。"""
+        if event.button.id == "start-task-button":
+            self.submit_entry_form()
+        elif event.button.id == "new-task-button":
+            self.switch_page(PAGE_ENTRY)
+        elif event.button.id == "task-manager-button":
+            self.switch_page(PAGE_TASKS)
+        elif event.button.id == "settings-button":
+            self.switch_page(PAGE_CONFIG)
+
+    def submit_entry_form(self) -> None:
+        """校验入口页表单并创建任务视图状态。"""
+        input_type = str(self.query_one("#input-type-select", Select).value or "")
+        input_text = self.query_one("#batch-input", TextArea).text
+        items = parse_input_items(input_type, input_text)
+        errors = validate_input_items(input_type, items)
+        error_widget = self.query_one("#entry-error", Static)
+
+        if not input_type or not items:
+            error_widget.update("请选择输入类型并输入至少一个条目。")
+            return
+        if errors:
+            error_widget.update("\n".join(errors))
+            return
+
+        error_widget.update("")
+        self.current_task = TaskViewState(input_type=input_type, inputs=items)
+        self.query_one("#progress-summary", Static).update(f"已创建任务：{len(items)} 个条目")
+        self.switch_page(PAGE_PROGRESS)
 
     def action_new_task(self) -> None:
         """Open the entry page."""

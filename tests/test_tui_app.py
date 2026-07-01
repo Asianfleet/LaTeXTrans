@@ -1,6 +1,6 @@
 import unittest
 
-from textual.widgets import ContentSwitcher, Footer, ListView
+from textual.widgets import ContentSwitcher, Footer, ListView, Select, Static, TextArea
 
 from setup import load_requirements
 from src.tui.app import (
@@ -11,6 +11,7 @@ from src.tui.app import (
     PAGE_TASKS,
     LaTeXTransTuiApp,
 )
+from src.tui.state import TaskViewState
 
 
 class TuiPackagingTests(unittest.TestCase):
@@ -49,6 +50,46 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
                     app.query_one("#main-switcher", ContentSwitcher).current,
                     page_id,
                 )
+
+
+class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
+    """验证入口页提交会创建任务状态并展示校验错误。"""
+
+    async def test_submit_entry_form_creates_task_and_switches_to_progress(self):
+        """确认有效入口表单会创建任务状态并切换到进度页。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test():
+            app.query_one("#input-type-select", Select).value = "arxiv"
+            app.query_one("#batch-input", TextArea).text = "2508.18791\n2407.01648"
+
+            app.submit_entry_form()
+
+            self.assertIsInstance(app.current_task, TaskViewState)
+            self.assertEqual(app.current_task.inputs, ["2508.18791", "2407.01648"])
+            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_PROGRESS)
+
+    async def test_start_button_submits_entry_form(self):
+        """确认开始按钮会提交入口表单并进入进度页。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test() as pilot:
+            app.query_one("#input-type-select", Select).value = "arxiv"
+            app.query_one("#batch-input", TextArea).text = "2508.18791"
+
+            await pilot.click("#start-task-button")
+
+            self.assertIsInstance(app.current_task, TaskViewState)
+            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_PROGRESS)
+
+    async def test_submit_entry_form_shows_validation_errors(self):
+        """确认无效入口表单会在入口页展示校验错误。"""
+        app = LaTeXTransTuiApp()
+        async with app.run_test():
+            app.query_one("#input-type-select", Select).value = "remote"
+            app.query_one("#batch-input", TextArea).text = "file:///bad.zip"
+
+            app.submit_entry_form()
+
+            self.assertIn("remote input must be", str(app.query_one("#entry-error", Static).content))
 
 
 if __name__ == "__main__":
