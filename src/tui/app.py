@@ -58,6 +58,15 @@ class LaTeXTransTuiApp(App[None]):
     """Main Textual application for LaTeXTransPlus."""
 
     DEFAULT_CSS = """
+
+    #sidebar {
+        width: 1fr;
+    }
+
+    #main-switcher {
+        width: 3fr;
+    }
+
     #config-form {
         padding: 1 2;
     }
