@@ -179,7 +179,7 @@ class LaTeXTransTuiApp(App[None]):
                                         yield from self._compose_config_field(field)
                                 yield Static("", id="config-error")
                         with TabPane("预览", id="config-preview-tab"):
-                            preview = TextArea(id="config-preview")
+                            preview = TextArea(id="config-preview", language="toml")
                             preview.read_only = True
                             yield preview
         yield Footer()
@@ -188,6 +188,7 @@ class LaTeXTransTuiApp(App[None]):
         """Load existing output projects into the sidebar when the app starts."""
         if not self.load_history_on_mount:
             return
+        self.theme = "nord"
         self.load_output_history()
 
     def switch_page(self, page_id: str) -> None:
