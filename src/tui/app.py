@@ -179,10 +179,10 @@ class LaTeXTransTuiApp(App[None]):
         """Compose the persistent sidebar, content switcher, and footer."""
         with Horizontal(id="app-body"):
             with Vertical(id="sidebar"):
-                yield Button("新建任务", id="new-task-button")
-                yield Button("项目管理", id="project-manager-button")
+                yield Button("新建任务", id="new-task-button", flat=True)
+                yield Button("项目管理", id="project-manager-button", flat=True)
                 yield ListView(id="project-list")
-                yield Button("设置", id="settings-button")
+                yield Button("设置", id="settings-button", flat=True)
             yield Rule(orientation="vertical", id="sidebar-rule")
             with ContentSwitcher(initial=PAGE_ENTRY, id="main-switcher"):
                 with Vertical(id=PAGE_ENTRY):
@@ -198,7 +198,7 @@ class LaTeXTransTuiApp(App[None]):
                                 ],
                                 id="input-type-select",
                             )
-                            yield Button("发送", id="start-task-button")
+                            yield Button("发送", id="start-task-button", flat=True)
                         yield Static("", id="entry-error")
                 with Vertical(id=PAGE_PROGRESS):
                     yield Static("未开始", id="progress-summary")
