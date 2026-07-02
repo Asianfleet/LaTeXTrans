@@ -89,6 +89,10 @@ class LaTeXTransTuiApp(App[None]):
         width: 4fr;
     }
 
+    #detail {
+        padding-top: 1;
+    }
+
     #entry {
         align: center top;
         padding-top: 3;

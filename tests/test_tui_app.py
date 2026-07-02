@@ -59,6 +59,17 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(app.query_one("#main-switcher", ContentSwitcher))
             self.assertIsNotNone(app.query_one(Footer))
 
+    def test_detail_page_adds_top_padding_above_tabs(self):
+        """确认项目详情页顶部和 Tab 标签之间保留间距。"""
+        self.assertIn("#detail {", LaTeXTransTuiApp.DEFAULT_CSS)
+        self.assertIn("padding-top: 1;", LaTeXTransTuiApp.DEFAULT_CSS)
+
+    async def test_detail_page_applies_top_padding_above_tabs(self):
+        """确认项目详情页实际应用顶部间距。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            self.assertEqual(app.query_one("#detail").styles.padding.top, 1)
+
     async def test_switch_page_updates_content_switcher(self):
         """确认 switch_page 会更新主内容切换器当前页面。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
