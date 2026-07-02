@@ -62,10 +62,31 @@ class LaTeXTransTuiApp(App[None]):
 
     #sidebar {
         width: 1fr;
+        padding: 0 1 0 1;
+    }
+
+    #sidebar Button {
+        width: 100%;
+        height: auto;
+    }
+
+    #project-list {
+        background: transparent;
+        padding: 0;
+        scrollbar-size: 1 1;
+    }
+
+    #sidebar-rule {
+        margin: 0;
+        padding: 0;
+    }
+
+    #project-list ListItem:hover {
+        background: $surface;
     }
 
     #main-switcher {
-        width: 3fr;
+        width: 4fr;
     }
 
     #entry {
