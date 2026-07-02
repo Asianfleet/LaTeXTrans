@@ -3,7 +3,21 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from textual.widgets import ContentSwitcher, DataTable, Footer, Input, ListView, ProgressBar, RichLog, Select, Static, TextArea
+from textual.css.query import NoMatches
+from textual.widgets import (
+    ContentSwitcher,
+    DataTable,
+    Footer,
+    Input,
+    ListView,
+    ProgressBar,
+    RichLog,
+    Select,
+    Static,
+    Switch,
+    TabbedContent,
+    TextArea,
+)
 
 from setup import load_requirements
 from src.tui.app import (
@@ -279,24 +293,158 @@ class TuiTaskProjectSemanticsTests(unittest.IsolatedAsyncioTestCase):
 class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
     """验证配置页会加载、编辑并保存 UI 配置。"""
 
-    async def test_load_config_page_writes_toml_preview(self):
-        """确认配置页加载会把 UI 配置写入 TOML 预览区。"""
+    async def test_settings_button_loads_structured_config_tabs(self):
+        """确认设置按钮会打开配置 tabs 并按字段类型填充表单。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        config = {
+            "sys_name": "LaTeXTransPlus",
+            "version": "0.1.0",
+            "source_language": "en",
+            "target_language": "ja",
+            "paper_list": ["2508.18791", "2407.01648"],
+            "tex_sources_dir": "tex source",
+            "output_dir": "outputs",
+            "category": {"cs": ["cs.LG"]},
+            "update_term": "True",
+            "mode": "plain",
+            "user_term": "terms/user.csv",
+            "terminology": {
+                "enabled": True,
+                "review_before_translate": False,
+                "max_llm_candidates": 30,
+            },
+            "validation": {
+                "retry": {
+                    "max_attempts": 3,
+                    "generate_pdf_on_error": True,
+                    "fail_on_error": True,
+                },
+                "issues": {
+                    "command_mismatch": {"severity": "error", "retryable": True},
+                    "placeholder_mismatch": {"severity": "warning", "retryable": False},
+                    "bracket_mismatch": {"severity": "error", "retryable": True},
+                },
+            },
+            "llm_config": {
+                "model": "deepseek-v4-flash",
+                "api_key_env": "DEEPSEEK_API_KEY",
+                "base_url": "https://api.deepseek.com/chat/completions",
+            },
+        }
+        async with app.run_test() as pilot:
+            with patch("src.tui.app.load_ui_config", return_value=config):
+                await pilot.click("#settings-button")
+
+            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_CONFIG)
+            self.assertIsNotNone(app.query_one("#config-tabs", TabbedContent))
+            self.assertEqual(app.query_one("#config-target_language", Select).value, "ja")
+            self.assertEqual(app.query_one("#config-source_language", Select).value, "en")
+            self.assertEqual(app.query_one("#config-paper_list", TextArea).text, "2508.18791\n2407.01648")
+            self.assertTrue(app.query_one("#config-update_term", Switch).value)
+            self.assertEqual(app.query_one("#config-validation-issues-placeholder_mismatch-severity", Select).value, "warning")
+            self.assertFalse(app.query_one("#config-validation-issues-placeholder_mismatch-retryable", Switch).value)
+            self.assertIn('target_language = "ja"', app.query_one("#config-preview", TextArea).text)
+            with self.assertRaises(NoMatches):
+                app.query_one("#config-sys_name", Input)
+            with self.assertRaises(NoMatches):
+                app.query_one("#config-version", Input)
+
+    async def test_config_page_has_no_manual_save_or_reload_buttons(self):
+        """确认配置页不再提供保存或重载按钮，避免手动保存语义漂移。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            self.assertIsNotNone(app.query_one("#config-tabs", TabbedContent))
+            with self.assertRaises(NoMatches):
+                app.query_one("#save-config-button")
+            with self.assertRaises(NoMatches):
+                app.query_one("#reload-config-button")
+
+    async def test_config_field_change_persists_immediately_and_refreshes_preview(self):
+        """确认配置字段变化后会即时保存 UI 配置并刷新 TOML 预览。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         async with app.run_test():
             with patch("src.tui.app.load_ui_config", return_value={"target_language": "ja"}):
                 app.load_config_page()
 
-            self.assertIn("target_language", app.query_one("#config-preview", TextArea).text)
-
-    async def test_save_config_page_persists_preview_toml(self):
-        """确认配置页保存会解析预览区 TOML 并写入 UI 配置文件。"""
-        app = LaTeXTransTuiApp(load_history_on_mount=False)
-        async with app.run_test():
-            app.query_one("#config-preview", TextArea).text = 'target_language = "fr"\n'
+            app.query_one("#config-target_language", Select).value = "fr"
             with patch("src.tui.app.save_ui_config") as save_config:
-                app.save_config_page()
+                app.persist_config_form_change()
 
             self.assertEqual(save_config.call_args.args[1]["target_language"], "fr")
+            preview = app.query_one("#config-preview", TextArea).text
+            self.assertIn('target_language = "fr"', preview)
+
+    async def test_config_change_collects_form_fields_and_preserves_metadata(self):
+        """确认即时保存会从结构化表单写回配置并保留不可编辑元数据。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        config = {
+            "sys_name": "LaTeXTransPlus",
+            "version": "0.1.0",
+            "source_language": "en",
+            "target_language": "ja",
+            "paper_list": [],
+            "tex_sources_dir": "tex source",
+            "output_dir": "outputs",
+            "category": {},
+            "update_term": "False",
+            "mode": "plain",
+            "user_term": "",
+            "terminology": {"enabled": True, "review_before_translate": False, "max_llm_candidates": 30},
+            "validation": {
+                "retry": {"max_attempts": 3, "generate_pdf_on_error": True, "fail_on_error": True},
+                "issues": {
+                    "command_mismatch": {"severity": "error", "retryable": True},
+                    "placeholder_mismatch": {"severity": "error", "retryable": True},
+                    "bracket_mismatch": {"severity": "error", "retryable": True},
+                },
+            },
+            "llm_config": {"model": "deepseek-v4-flash", "api_key_env": "DEEPSEEK_API_KEY", "base_url": ""},
+        }
+        async with app.run_test():
+            with patch("src.tui.app.load_ui_config", return_value=config):
+                app.load_config_page()
+
+            app.query_one("#config-target_language", Select).value = "fr"
+            app.query_one("#config-source_language", Select).value = "de"
+            app.query_one("#config-paper_list", TextArea).text = "2508.18791\n2407.01648\n"
+            app.query_one("#config-category", TextArea).text = '{"cs": ["cs.LG"]}'
+            app.query_one("#config-update_term", Switch).value = True
+            app.query_one("#config-terminology-max_llm_candidates", Input).value = "12"
+            app.query_one("#config-validation-retry-max_attempts", Input).value = "2"
+            app.query_one("#config-validation-issues-command_mismatch-severity", Select).value = "warning"
+            app.query_one("#config-validation-issues-command_mismatch-retryable", Switch).value = False
+            app.query_one("#config-llm_config-model", Input).value = "model-x"
+            with patch("src.tui.app.save_ui_config") as save_config:
+                app.persist_config_form_change()
+
+            saved = save_config.call_args.args[1]
+            self.assertEqual(saved["sys_name"], "LaTeXTransPlus")
+            self.assertEqual(saved["version"], "0.1.0")
+            self.assertEqual(saved["target_language"], "fr")
+            self.assertEqual(saved["source_language"], "de")
+            self.assertEqual(saved["paper_list"], ["2508.18791", "2407.01648"])
+            self.assertEqual(saved["category"], {"cs": ["cs.LG"]})
+            self.assertEqual(saved["update_term"], "True")
+            self.assertEqual(saved["terminology"]["max_llm_candidates"], 12)
+            self.assertEqual(saved["validation"]["retry"]["max_attempts"], 2)
+            self.assertEqual(saved["validation"]["issues"]["command_mismatch"]["severity"], "warning")
+            self.assertFalse(saved["validation"]["issues"]["command_mismatch"]["retryable"])
+            self.assertEqual(saved["llm_config"]["model"], "model-x")
+            self.assertIn('target_language = "fr"', app.query_one("#config-preview", TextArea).text)
+
+    async def test_config_change_rejects_invalid_integer_fields(self):
+        """确认非法整数配置会显示错误并阻止即时保存。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            with patch("src.tui.app.load_ui_config", return_value={"terminology": {"max_llm_candidates": 30}}):
+                app.load_config_page()
+
+            app.query_one("#config-terminology-max_llm_candidates", Input).value = "-1"
+            with patch("src.tui.app.save_ui_config") as save_config:
+                app.persist_config_form_change()
+
+            save_config.assert_not_called()
+            self.assertIn("非负整数", str(app.query_one("#config-error", Static).content))
 
 
 class TuiProgressTests(unittest.IsolatedAsyncioTestCase):

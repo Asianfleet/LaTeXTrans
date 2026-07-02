@@ -10,7 +10,7 @@ from pathlib import Path
 import toml
 from textual import work
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Button,
     ContentSwitcher,
@@ -30,6 +30,17 @@ from textual.widgets import (
 )
 
 from src.tui.config import UI_CONFIG_PATH, load_ui_config, save_ui_config
+from src.tui.config_schema import (
+    CONFIG_FIELDS,
+    ConfigField,
+    bool_for_field,
+    form_text_for_field,
+    grouped_config_fields,
+    normalized_config_from_form,
+    parse_integer_value,
+    parse_textarea_value,
+    select_value_for_field,
+)
 from src.tui.history import load_output_history, write_project_metadata
 from src.tui.input_parser import parse_input_items, validate_input_items
 from src.tui.runner import run_tui_task
@@ -45,6 +56,38 @@ PAGE_CONFIG = "config"
 
 class LaTeXTransTuiApp(App[None]):
     """Main Textual application for LaTeXTransPlus."""
+
+    DEFAULT_CSS = """
+    #config-form {
+        padding: 1 2;
+    }
+
+    .config-section-title {
+        text-style: bold;
+        margin: 1 0 0 0;
+    }
+
+    .config-field-row {
+        height: auto;
+        margin: 0 0 1 0;
+    }
+
+    .config-field-label {
+        width: 24;
+        padding: 1 1 0 0;
+    }
+
+    .config-field-row Input,
+    .config-field-row Select {
+        width: 1fr;
+    }
+
+    .config-field-row TextArea {
+        width: 1fr;
+        height: 5;
+    }
+
+    """
 
     current_task: TaskViewState | None = None
     tasks: list[TaskViewState]
@@ -73,6 +116,8 @@ class LaTeXTransTuiApp(App[None]):
         self.selected_project_name = None
         self.selected_task_id = None
         self.load_history_on_mount = load_history_on_mount
+        self.current_config: dict[str, object] = {}
+        self.loading_config_form = False
 
     def compose(self) -> ComposeResult:
         """Compose the persistent sidebar, content switcher, and footer."""
@@ -125,18 +170,25 @@ class LaTeXTransTuiApp(App[None]):
                 with Vertical(id=PAGE_TASKS):
                     yield DataTable(id="task-table")
                 with Vertical(id=PAGE_CONFIG):
-                    yield Input(id="config-path-input")
-                    yield Select([("浅色", "light"), ("深色", "dark")], id="theme-select")
-                    yield Switch(id="config-switch")
-                    yield TextArea(id="config-preview")
-                    yield Button("保存", id="save-config-button")
-                    yield Button("重载", id="reload-config-button")
+                    with TabbedContent(initial="config-form-tab", id="config-tabs"):
+                        with TabPane("配置", id="config-form-tab"):
+                            with VerticalScroll(id="config-form"):
+                                for section, fields in grouped_config_fields():
+                                    yield Static(section, classes="config-section-title")
+                                    for field in fields:
+                                        yield from self._compose_config_field(field)
+                                yield Static("", id="config-error")
+                        with TabPane("预览", id="config-preview-tab"):
+                            preview = TextArea(id="config-preview", language="toml")
+                            preview.read_only = True
+                            yield preview
         yield Footer()
 
     def on_mount(self) -> None:
         """Load existing output projects into the sidebar when the app starts."""
         if not self.load_history_on_mount:
             return
+        self.theme = "nord"
         self.load_output_history()
 
     def switch_page(self, page_id: str) -> None:
@@ -226,23 +278,120 @@ class LaTeXTransTuiApp(App[None]):
             self.switch_page(PAGE_TASKS)
         elif event.button.id == "settings-button":
             self.switch_page(PAGE_CONFIG)
-        elif event.button.id == "save-config-button":
-            self.save_config_page()
-        elif event.button.id == "reload-config-button":
             self.load_config_page()
         elif event.button.id == "import-zotero-button":
             self.import_selected_project_to_zotero()
 
-    def load_config_page(self) -> None:
-        """将 UI 配置加载到配置页 TOML 预览区。"""
-        config = load_ui_config(Path.cwd())
-        self.query_one("#config-preview", TextArea).text = toml.dumps(config)
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """配置输入框变化时立即保存并刷新预览。"""
+        if self._is_config_widget(event.input.id):
+            self.persist_config_form_change()
 
-    def save_config_page(self) -> None:
-        """解析配置页 TOML 预览区内容并保存 UI 配置。"""
-        config_text = self.query_one("#config-preview", TextArea).text
-        config = toml.loads(config_text)
+    def on_select_changed(self, event: Select.Changed) -> None:
+        """配置下拉框变化时立即保存并刷新预览。"""
+        if self._is_config_widget(event.select.id):
+            self.persist_config_form_change()
+
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        """配置开关变化时立即保存并刷新预览。"""
+        if self._is_config_widget(event.switch.id):
+            self.persist_config_form_change()
+
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        """配置多行文本变化时立即保存并刷新预览。"""
+        if self._is_config_widget(event.text_area.id):
+            self.persist_config_form_change()
+
+    def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        """切到配置预览页时刷新未保存表单对应的 TOML。"""
+        if event.tabbed_content.id == "config-tabs" and event.pane.id == "config-preview-tab":
+            self.persist_config_form_change()
+
+    def load_config_page(self) -> None:
+        """将 UI 配置加载到结构化表单和 TOML 预览区。"""
+        config = load_ui_config(Path.cwd())
+        self.current_config = dict(config)
+        self.loading_config_form = True
+        try:
+            self._populate_config_form(config)
+        finally:
+            self.loading_config_form = False
+        self._update_config_preview(config)
+        self.query_one("#config-error", Static).update("")
+
+    def persist_config_form_change(self) -> None:
+        """从当前表单刷新 TOML 预览并立即保存 UI 配置。"""
+        if self.loading_config_form:
+            return
+        try:
+            config = self._config_from_form()
+        except ValueError as exc:
+            self.query_one("#config-error", Static).update(str(exc))
+            return
         save_ui_config(Path.cwd(), config)
+        self.current_config = dict(config)
+        self._update_config_preview(config)
+        self.query_one("#config-error", Static).update("")
+
+    def _is_config_widget(self, widget_id: str | None) -> bool:
+        """判断事件来源是否为设置页配置控件。"""
+        return bool(widget_id and widget_id.startswith("config-") and widget_id != "config-preview")
+
+    def _config_from_form(self) -> dict[str, object]:
+        """将当前表单转换为完整配置对象。"""
+        values = self._collect_config_form_values()
+        return normalized_config_from_form(dict(self.current_config), values)
+
+    def _compose_config_field(self, field: ConfigField) -> ComposeResult:
+        """组合单个设置项的标签和编辑控件。"""
+        with Horizontal(classes="config-field-row"):
+            yield Static(field.label, classes="config-field-label")
+            if field.kind == "select":
+                yield Select(field.options, id=field.widget_id)
+            elif field.kind == "switch":
+                yield Switch(id=field.widget_id)
+            elif field.kind == "textarea":
+                yield TextArea(id=field.widget_id)
+            else:
+                yield Input(id=field.widget_id)
+
+    def _populate_config_form(self, config: dict[str, object]) -> None:
+        """把配置值填入设置页表单控件。"""
+        for field in CONFIG_FIELDS:
+            if field.kind == "select":
+                self.query_one(f"#{field.widget_id}", Select).value = select_value_for_field(field, config)
+            elif field.kind == "switch":
+                self.query_one(f"#{field.widget_id}", Switch).value = bool_for_field(field, config)
+            elif field.kind == "textarea":
+                self.query_one(f"#{field.widget_id}", TextArea).text = form_text_for_field(field, config)
+            else:
+                self.query_one(f"#{field.widget_id}", Input).value = form_text_for_field(field, config)
+
+    def _collect_config_form_values(self) -> dict[tuple[str, ...], object]:
+        """从设置页表单控件读取并校验配置值。"""
+        values: dict[tuple[str, ...], object] = {}
+        for field in CONFIG_FIELDS:
+            if field.kind == "select":
+                select = self.query_one(f"#{field.widget_id}", Select)
+                values[field.path] = "" if select.is_blank() else str(select.value)
+            elif field.kind == "switch":
+                value = self.query_one(f"#{field.widget_id}", Switch).value
+                values[field.path] = "True" if field.path == ("update_term",) and value else (
+                    "False" if field.path == ("update_term",) else value
+                )
+            elif field.kind == "textarea":
+                text = self.query_one(f"#{field.widget_id}", TextArea).text
+                values[field.path] = parse_textarea_value(field, text)
+            elif field.kind == "integer":
+                text = self.query_one(f"#{field.widget_id}", Input).value
+                values[field.path] = parse_integer_value(field, text)
+            else:
+                values[field.path] = self.query_one(f"#{field.widget_id}", Input).value
+        return values
+
+    def _update_config_preview(self, config: dict[str, object]) -> None:
+        """刷新设置页 TOML 预览。"""
+        self.query_one("#config-preview", TextArea).text = toml.dumps(config)
 
     def submit_entry_form(self) -> None:
         """校验入口页表单并创建任务视图状态。"""
@@ -599,6 +748,7 @@ class LaTeXTransTuiApp(App[None]):
     def action_settings(self) -> None:
         """Open the configuration page."""
         self.switch_page(PAGE_CONFIG)
+        self.load_config_page()
 
 
 def run() -> None:
