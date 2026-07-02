@@ -21,6 +21,7 @@ from textual.widgets import (
     ListView,
     ProgressBar,
     RichLog,
+    Rule,
     Select,
     Static,
     Switch,
@@ -65,6 +66,52 @@ class LaTeXTransTuiApp(App[None]):
 
     #main-switcher {
         width: 3fr;
+    }
+
+    #entry {
+        align: center top;
+        padding-top: 3;
+    }
+
+    #entry-form {
+        width: 70%;
+        min-width: 50;
+        max-width: 90;
+        height: auto;
+        align-horizontal: center;
+    }
+
+    #app-title {
+        width: 100%;
+        content-align: center middle;
+        text-style: bold;
+        text-align: center;
+        margin: 0 0 2 0;
+    }
+
+    #batch-input {
+        width: 100%;
+        height: 8;
+        margin: 0 0 1 0;
+    }
+
+    #entry-actions {
+        width: 100%;
+        height: 3;
+    }
+
+    #input-type-select {
+        width: 24;
+    }
+
+    #start-task-button {
+        dock: right;
+        width: 10;
+    }
+
+    #entry-error {
+        width: 100%;
+        margin: 1 0 0 0;
     }
 
     #config-form {
@@ -136,20 +183,23 @@ class LaTeXTransTuiApp(App[None]):
                 yield Button("项目管理", id="project-manager-button")
                 yield ListView(id="project-list")
                 yield Button("设置", id="settings-button")
+            yield Rule(orientation="vertical", id="sidebar-rule")
             with ContentSwitcher(initial=PAGE_ENTRY, id="main-switcher"):
                 with Vertical(id=PAGE_ENTRY):
-                    yield Static("LaTeXTransPlus", id="app-title")
-                    yield Select(
-                        [
-                            ("arXiv ID / URL", "arxiv"),
-                            ("本地项目/压缩包", "local"),
-                            ("远程压缩包 URL", "remote"),
-                        ],
-                        id="input-type-select",
-                    )
-                    yield TextArea(id="batch-input")
-                    yield Button("开始", id="start-task-button")
-                    yield Static("", id="entry-error")
+                    with Vertical(id="entry-form"):
+                        yield Static("LaTeXTransPlus", id="app-title")
+                        yield TextArea(id="batch-input")
+                        with Horizontal(id="entry-actions"):
+                            yield Select(
+                                [
+                                    ("arXiv ID / URL", "arxiv"),
+                                    ("本地项目/压缩包", "local"),
+                                    ("远程压缩包 URL", "remote"),
+                                ],
+                                id="input-type-select",
+                            )
+                            yield Button("发送", id="start-task-button")
+                        yield Static("", id="entry-error")
                 with Vertical(id=PAGE_PROGRESS):
                     yield Static("未开始", id="progress-summary")
                     yield ProgressBar(id="task-progress")

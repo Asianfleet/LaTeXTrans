@@ -5,6 +5,7 @@ from unittest.mock import Mock, patch
 
 from textual.css.query import NoMatches
 from textual.widgets import (
+    Button,
     ContentSwitcher,
     DataTable,
     Footer,
@@ -72,6 +73,23 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
 
 class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
     """验证入口页提交会创建任务状态并展示校验错误。"""
+
+    async def test_entry_page_uses_centered_initial_form_layout(self):
+        """确认入口页使用居中的标题、输入框、下拉菜单和发送按钮布局。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            self.assertEqual(str(app.query_one("#app-title", Static).content), "LaTeXTransPlus")
+            self.assertIsNotNone(app.query_one("#entry-form"))
+            self.assertIsNotNone(app.query_one("#entry-actions"))
+
+            form_children = [child.id for child in app.query_one("#entry-form").children]
+            self.assertEqual(
+                form_children[:4],
+                ["app-title", "batch-input", "entry-actions", "entry-error"],
+            )
+            action_children = [child.id for child in app.query_one("#entry-actions").children]
+            self.assertEqual(action_children, ["input-type-select", "start-task-button"])
+            self.assertEqual(str(app.query_one("#start-task-button", Button).label), "发送")
 
     async def test_submit_entry_form_creates_task_and_switches_to_progress(self):
         """确认有效入口表单会创建任务状态并切换到进度页。"""
