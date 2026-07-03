@@ -90,6 +90,8 @@ class LaTeXTransTuiApp(App[None]):
         width: 4fr;
     }
 
+    #config,
+    #tasks,
     #detail {
         padding-top: 1;
     }
