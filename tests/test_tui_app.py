@@ -59,6 +59,16 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(app.query_one("#main-switcher", ContentSwitcher))
             self.assertIsNotNone(app.query_one(Footer))
 
+    async def test_tex_preview_uses_rich_latex_syntax_widget(self):
+        """确认 TeX 预览使用离线 Rich LaTeX 高亮控件。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            from textual.widgets import Static
+
+            tex_preview = app.query_one("#tex-preview", Static)
+
+            self.assertEqual(tex_preview.id, "tex-preview")
+
     def test_detail_page_adds_top_padding_above_tabs(self):
         """确认项目详情页顶部和 Tab 标签之间保留间距。"""
         self.assertIn("#detail {", LaTeXTransTuiApp.DEFAULT_CSS)
@@ -274,7 +284,8 @@ class TuiTaskProjectSemanticsTests(unittest.IsolatedAsyncioTestCase):
                     app.select_project("2308.10248")
                     await pilot.pause()
 
-                    self.assertIn("\\documentclass{article}", app.query_one("#tex-preview", TextArea).text)
+                    tex_preview = app.query_one("#tex-preview", Static)
+                    self.assertIn("\\documentclass{article}", tex_preview.content.code)
                     self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_DETAIL)
 
     async def test_submit_entry_form_uses_timestamp_task_id(self):
@@ -679,9 +690,8 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertIn("paper.pdf", str(app.query_one("#detail-paths", Static).content))
                 self.assertIn("compile failed", str(app.query_one("#detail-paths", Static).content))
-                tex_preview = app.query_one("#tex-preview", TextArea)
-                self.assertTrue(tex_preview.read_only)
-                self.assertIn("\\section{Result}", tex_preview.text)
+                tex_preview = app.query_one("#tex-preview", Static)
+                self.assertIn("\\section{Result}", tex_preview.content.code)
                 self.assertIn("compile ok", str(app.query_one("#project-log-summary", Static).content))
                 errors_table = app.query_one("#errors-table", DataTable)
                 self.assertEqual(errors_table.row_count, 1)

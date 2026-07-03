@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 import toml
+from rich.syntax import Syntax
 from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -91,6 +92,14 @@ class LaTeXTransTuiApp(App[None]):
 
     #detail {
         padding-top: 1;
+    }
+
+    #tex-preview-scroll {
+        height: 1fr;
+    }
+
+    #tex-preview {
+        width: 100%;
     }
 
     #entry {
@@ -232,9 +241,8 @@ class LaTeXTransTuiApp(App[None]):
                 with Vertical(id=PAGE_DETAIL):
                     with TabbedContent(initial="tex-tab", id="detail-tabs"):
                         with TabPane("TeX", id="tex-tab"):
-                            tex_preview = TextArea(id="tex-preview")
-                            tex_preview.read_only = True
-                            yield tex_preview
+                            with VerticalScroll(id="tex-preview-scroll"):
+                                yield Static("", id="tex-preview")
                         with TabPane("术语表", id="terms-tab"):
                             yield DataTable(id="terms-table")
                         with TabPane("错误记录", id="errors-tab"):
@@ -651,17 +659,26 @@ class LaTeXTransTuiApp(App[None]):
 
     def _refresh_tex_preview(self, project: ProjectViewState) -> None:
         """Load the first TeX source as a read-only preview."""
-        tex_preview = self.query_one("#tex-preview", TextArea)
-        tex_preview.read_only = True
+        tex_preview = self.query_one("#tex-preview", Static)
         tex_path = self._find_tex_preview_path(project)
         if tex_path is None:
-            tex_preview.text = ""
+            tex_preview.update("")
             return
 
         try:
-            tex_preview.text = tex_path.read_text(encoding="utf-8")
+            tex_preview.update(self._latex_syntax(tex_path.read_text(encoding="utf-8")))
         except OSError as exc:
-            tex_preview.text = f"无法读取 TeX 文件：{exc}"
+            tex_preview.update(f"无法读取 TeX 文件：{exc}")
+
+    def _latex_syntax(self, source: str) -> Syntax:
+        """把 TeX 源码转换为离线 Rich LaTeX 高亮对象。"""
+        return Syntax(
+            source,
+            "latex",
+            theme="ansi_dark",
+            line_numbers=True,
+            word_wrap=True,
+        )
 
     def _find_tex_preview_path(self, project: ProjectViewState) -> Path | None:
         """Find a representative TeX file for the project preview."""
