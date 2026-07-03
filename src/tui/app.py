@@ -252,15 +252,14 @@ class LaTeXTransTuiApp(App[None]):
                         with TabPane("日志", id="log-tab"):
                             yield Static("", id="project-log-summary")
                             yield RichLog(id="project-log")
-                    yield Static("", id="detail-paths")
-                    yield Input(id="zotero-api-key-input", password=True)
-                    yield Input(id="zotero-script-path-input")
-                    yield Input(id="zotero-library-id-input")
-                    yield Select([("用户库", "user"), ("群组库", "group")], id="zotero-library-type-select")
-                    yield Input(id="zotero-item-key-input")
-                    yield Static("", id="zotero-status")
-                    yield Button("打开输出目录", id="open-output-button")
-                    yield Button("导入 Zotero", id="import-zotero-button")
+                        with TabPane("Zotero", id="zotero-tab"):
+                            yield Input(id="zotero-api-key-input", password=True)
+                            yield Input(id="zotero-script-path-input")
+                            yield Input(id="zotero-library-id-input")
+                            yield Select([("用户库", "user"), ("群组库", "group")], id="zotero-library-type-select")
+                            yield Input(id="zotero-item-key-input")
+                            yield Static("", id="zotero-status")
+                            yield Button("导入 Zotero", id="import-zotero-button")
                 with Vertical(id=PAGE_TASKS):
                     yield DataTable(id="task-table")
                 with Vertical(id=PAGE_CONFIG):
@@ -338,7 +337,6 @@ class LaTeXTransTuiApp(App[None]):
         self._refresh_errors_table(project)
         self._refresh_terms_table(project)
         self.query_one("#zotero-status", Static).update(project.zotero_status)
-        self.query_one("#detail-paths", Static).update(self._project_detail_summary(project))
 
     def refresh_task_table(self) -> None:
         """Refresh the project management table from all known task states."""
@@ -645,20 +643,6 @@ class LaTeXTransTuiApp(App[None]):
                 return item
         return task.inputs[0] if task.inputs else project_name
 
-    def _project_detail_summary(self, project: ProjectViewState) -> str:
-        """Build the visible detail summary for project artifacts."""
-        lines = [
-            f"项目: {project.project_name}",
-            f"状态: {project.status.value}",
-            f"PDF: {project.pdf_path or '-'}",
-            f"Output: {project.output_dir or '-'}",
-            f"Log: {project.log_path or '-'}",
-            f"错误报告: {project.errors_report_path or '-'}",
-        ]
-        if project.error:
-            lines.append(f"错误: {project.error}")
-        return "\n".join(lines)
-
     def _refresh_tex_preview(self, project: ProjectViewState) -> None:
         """Load the first TeX source as a read-only preview."""
         tex_preview = self.query_one("#tex-preview", Static)
@@ -732,11 +716,7 @@ class LaTeXTransTuiApp(App[None]):
         """Refresh the selected project's read-only terminology table."""
         table = self.query_one("#terms-table", DataTable)
         table.clear(columns=True)
-        table.add_columns("字段", "值")
-        if project.project_terms_path:
-            table.add_row("术语表路径", project.project_terms_path)
-        if project.project_terms_decisions_path:
-            table.add_row("决策记录路径", project.project_terms_decisions_path)
+        table.add_columns("术语", "译文")
         if not project.project_terms_path:
             return
 
@@ -753,7 +733,7 @@ class LaTeXTransTuiApp(App[None]):
                 table.add_row(row[0], row[1])
 
     def import_selected_project_to_zotero(self) -> None:
-        """Attach the selected project's translated PDF to an explicit Zotero item."""
+        """把当前选中项目的译文 PDF 附加到显式指定的 Zotero 条目。"""
         project = self._selected_project()
         status_widget = self.query_one("#zotero-status", Static)
         if project is None:

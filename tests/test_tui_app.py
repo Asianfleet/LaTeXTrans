@@ -80,6 +80,28 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
         async with app.run_test():
             self.assertEqual(app.query_one("#detail").styles.padding.top, 1)
 
+    async def test_detail_page_keeps_zotero_controls_inside_tab(self):
+        """确认详情页把 Zotero 控件放进独立 tab，而不是放在 tab 下方。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            detail = app.query_one("#detail")
+            self.assertEqual([child.id for child in detail.children], ["detail-tabs"])
+            zotero_tab = app.query_one("#zotero-tab")
+            for selector in [
+                "#zotero-api-key-input",
+                "#zotero-script-path-input",
+                "#zotero-library-id-input",
+                "#zotero-library-type-select",
+                "#zotero-item-key-input",
+                "#zotero-status",
+                "#import-zotero-button",
+            ]:
+                self.assertIsNotNone(zotero_tab.query_one(selector))
+            with self.assertRaises(NoMatches):
+                app.query_one("#detail-paths")
+            with self.assertRaises(NoMatches):
+                app.query_one("#open-output-button")
+
     async def test_switch_page_updates_content_switcher(self):
         """确认 switch_page 会更新主内容切换器当前页面。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
@@ -629,7 +651,8 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(app.selected_project_name, "paper")
             self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_DETAIL)
-            self.assertIn("paper.pdf", str(app.query_one("#detail-paths", Static).content))
+            with self.assertRaises(NoMatches):
+                app.query_one("#detail-paths", Static)
 
     async def test_refresh_task_table_adds_project_rows(self):
         """确认任务管理表会展示当前任务下的项目行。"""
@@ -660,7 +683,7 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("paper", str(list_view.children[0].query_one(Static).content))
 
     async def test_refresh_detail_page_populates_project_artifacts(self):
-        """确认详情页会展示路径、错误、日志，并保持 TeX 预览只读。"""
+        """确认详情页会展示 TeX、错误表和日志，不再展示底部路径摘要。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         with TemporaryDirectory() as temp_dir:
             project_dir = Path(temp_dir)
@@ -688,8 +711,8 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
                 app.refresh_detail_page()
                 await pilot.pause()
 
-                self.assertIn("paper.pdf", str(app.query_one("#detail-paths", Static).content))
-                self.assertIn("compile failed", str(app.query_one("#detail-paths", Static).content))
+                with self.assertRaises(NoMatches):
+                    app.query_one("#detail-paths", Static)
                 tex_preview = app.query_one("#tex-preview", Static)
                 self.assertIn("\\section{Result}", tex_preview.content.code)
                 self.assertIn("compile ok", str(app.query_one("#project-log-summary", Static).content))
@@ -699,7 +722,7 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(errors_table.get_cell_at((0, 1)), "compile failed")
 
     async def test_refresh_detail_page_populates_terms_table(self):
-        """确认详情页会从项目状态中的术语表路径渲染术语行和路径。"""
+        """确认详情页术语表只渲染 CSV 中的术语行。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         with TemporaryDirectory() as temp_dir:
             project_dir = Path(temp_dir)
@@ -726,25 +749,23 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
                 app.refresh_detail_page()
 
                 terms_table = app.query_one("#terms-table", DataTable)
-                self.assertEqual(terms_table.row_count, 4)
-                self.assertEqual(terms_table.get_cell_at((0, 0)), "术语表路径")
-                self.assertEqual(terms_table.get_cell_at((0, 1)), str(terms_path))
-                self.assertEqual(terms_table.get_cell_at((1, 0)), "决策记录路径")
-                self.assertEqual(terms_table.get_cell_at((1, 1)), str(decisions_path))
-                self.assertEqual(terms_table.get_cell_at((2, 0)), "Graph")
-                self.assertEqual(terms_table.get_cell_at((2, 1)), "图")
+                self.assertEqual(terms_table.row_count, 2)
+                self.assertEqual(terms_table.get_cell_at((0, 0)), "Graph")
+                self.assertEqual(terms_table.get_cell_at((0, 1)), "图")
+                self.assertEqual(terms_table.get_cell_at((1, 0)), "Model")
+                self.assertEqual(terms_table.get_cell_at((1, 1)), "模型")
 
 
 class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
-    """验证 Zotero 导入按钮只对选中项目的 PDF 调用 adapter 并反馈状态。"""
+    """验证 Zotero tab 能对选中项目的 PDF 调用 adapter 并反馈状态。"""
 
     async def test_import_zotero_button_attaches_selected_project_pdf(self):
-        """确认导入 Zotero 按钮会用显式条目信息附加当前项目 PDF。"""
+        """确认 Zotero tab 按钮会用显式条目信息附加当前项目 PDF。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         adapter = Mock()
         adapter.attach_pdf.return_value = {"attachment_key": "ATTACH1", "status": "uploaded"}
 
-        async with app.run_test() as pilot:
+        async with app.run_test():
             app.zotero_adapter_factory = lambda api_key, script_path: adapter
             app.current_task = TaskViewState(input_type="local", inputs=["paper"])
             app.current_task.projects.append(
@@ -775,7 +796,7 @@ class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
         adapter = Mock()
         adapter.attach_pdf.side_effect = RuntimeError("zotero failed")
 
-        async with app.run_test() as pilot:
+        async with app.run_test():
             app.zotero_adapter_factory = lambda api_key, script_path: adapter
             app.current_task = TaskViewState(input_type="local", inputs=["paper"])
             app.current_task.projects.append(
@@ -803,7 +824,7 @@ class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("zotero failed", str(app.query_one("#zotero-status", Static).content))
 
     async def test_import_zotero_button_branch_calls_import_method(self):
-        """确认 Zotero 按钮分支会同步调用导入方法。"""
+        """确认 Zotero tab 按钮分支会同步调用导入方法。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         event = Mock()
         event.button.id = "import-zotero-button"
