@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import csv
-import sys
+import os
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -179,6 +180,32 @@ class LaTeXTransTuiApp(App[None]):
         height: 5;
     }
 
+    #zotero-controls {
+          width: 100%;
+          height: 3;
+      }
+
+      #zotero-library-select {
+          width: 16;
+      }
+
+      #zotero-search-input {
+          width: 1fr;
+      }
+
+      #zotero-search-button,
+      #zotero-auto-match-button,
+      #import-zotero-button {
+          width: auto;
+      }
+
+      #zotero-import-rule {
+          height: 3;
+      }
+
+      #zotero-results {
+          height: 1fr;
+      }
     """
 
     current_task: TaskViewState | None = None
@@ -186,10 +213,9 @@ class LaTeXTransTuiApp(App[None]):
     selected_project_name: str | None = None
     selected_task_id: str | None = None
     zotero_adapter_factory = staticmethod(
-        lambda api_key, script_path: ZoteroAdapter(
-            python_cmd=[sys.executable],
-            script_path=script_path,
+        lambda api_key, local_api_base: ZoteroAdapter(
             api_key=api_key,
+            local_api_base=local_api_base,
         )
     )
 
@@ -210,6 +236,9 @@ class LaTeXTransTuiApp(App[None]):
         self.load_history_on_mount = load_history_on_mount
         self.current_config: dict[str, object] = {}
         self.loading_config_form = False
+        self.zotero_libraries: list[dict[str, object]] = []
+        self.zotero_results: list[dict[str, object]] = []
+        self.zotero_selected_keys: set[str] = set()
 
     def compose(self) -> ComposeResult:
         """Compose the persistent sidebar, content switcher, and footer."""
@@ -253,13 +282,14 @@ class LaTeXTransTuiApp(App[None]):
                             yield Static("", id="project-log-summary")
                             yield RichLog(id="project-log")
                         with TabPane("Zotero", id="zotero-tab"):
-                            yield Input(id="zotero-api-key-input", password=True)
-                            yield Input(id="zotero-script-path-input")
-                            yield Input(id="zotero-library-id-input")
-                            yield Select([("用户库", "user"), ("群组库", "group")], id="zotero-library-type-select")
-                            yield Input(id="zotero-item-key-input")
-                            yield Static("", id="zotero-status")
-                            yield Button("导入 Zotero", id="import-zotero-button")
+                            with Horizontal(id="zotero-controls"):
+                                yield Select([], id="zotero-library-select")
+                                yield Input(id="zotero-search-input")
+                                yield Button("搜索", id="zotero-search-button")
+                                yield Button("自动匹配", id="zotero-auto-match-button")
+                                yield Rule(orientation="vertical", id="zotero-import-rule")
+                                yield Button("导入", id="import-zotero-button")
+                            yield DataTable(id="zotero-results")
                 with Vertical(id=PAGE_TASKS):
                     yield DataTable(id="task-table")
                 with Vertical(id=PAGE_CONFIG):
@@ -279,6 +309,7 @@ class LaTeXTransTuiApp(App[None]):
 
     def on_mount(self) -> None:
         """Load existing output projects into the sidebar when the app starts."""
+        self._initialize_zotero_results_table()
         if not self.load_history_on_mount:
             return
         self.theme = "nord"
@@ -315,6 +346,7 @@ class LaTeXTransTuiApp(App[None]):
             task_id = project_identity[0]
         self.selected_project_name = project_name
         self.selected_task_id = task_id
+        self.clear_zotero_results()
         self.refresh_detail_page()
         self.switch_page(PAGE_DETAIL)
 
@@ -336,7 +368,7 @@ class LaTeXTransTuiApp(App[None]):
         self._refresh_project_log(project)
         self._refresh_errors_table(project)
         self._refresh_terms_table(project)
-        self.query_one("#zotero-status", Static).update(project.zotero_status)
+        self._refresh_zotero_controls()
 
     def refresh_task_table(self) -> None:
         """Refresh the project management table from all known task states."""
@@ -360,6 +392,14 @@ class LaTeXTransTuiApp(App[None]):
             task, project = project_states[event.index]
             self.select_project(project.project_name, task.task_id)
 
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """切换 Zotero 结果行的选中状态。"""
+        if event.data_table.id != "zotero-results":
+            return
+        row_index = event.cursor_row
+        if row_index is not None:
+            self.toggle_zotero_row_selection(row_index)
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """处理主导航和任务入口按钮。"""
         if event.button.id == "start-task-button":
@@ -371,6 +411,10 @@ class LaTeXTransTuiApp(App[None]):
         elif event.button.id == "settings-button":
             self.switch_page(PAGE_CONFIG)
             self.load_config_page()
+        elif event.button.id == "zotero-search-button":
+            self.search_zotero_items()
+        elif event.button.id == "zotero-auto-match-button":
+            self.auto_match_zotero_items()
         elif event.button.id == "import-zotero-button":
             self.import_selected_project_to_zotero()
 
@@ -378,6 +422,11 @@ class LaTeXTransTuiApp(App[None]):
         """配置输入框变化时立即保存并刷新预览。"""
         if self._is_config_widget(event.input.id):
             self.persist_config_form_change()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """搜索框回车时触发 Zotero 搜索。"""
+        if event.input.id == "zotero-search-input":
+            self.search_zotero_items()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         """配置下拉框变化时立即保存并刷新预览。"""
@@ -398,6 +447,8 @@ class LaTeXTransTuiApp(App[None]):
         """切到配置预览页时刷新未保存表单对应的 TOML。"""
         if event.tabbed_content.id == "config-tabs" and event.pane.id == "config-preview-tab":
             self.persist_config_form_change()
+        elif event.tabbed_content.id == "detail-tabs" and event.pane.id == "zotero-tab":
+            self.load_zotero_libraries()
 
     def load_config_page(self) -> None:
         """将 UI 配置加载到结构化表单和 TOML 预览区。"""
@@ -732,52 +783,228 @@ class LaTeXTransTuiApp(App[None]):
             if len(row) >= 2:
                 table.add_row(row[0], row[1])
 
-    def import_selected_project_to_zotero(self) -> None:
-        """把当前选中项目的译文 PDF 附加到显式指定的 Zotero 条目。"""
-        project = self._selected_project()
-        status_widget = self.query_one("#zotero-status", Static)
-        if project is None:
-            status_widget.update("请选择一个项目。")
-            return
-        if not project.pdf_path:
-            project.zotero_status = "失败：当前项目没有 PDF。"
-            status_widget.update(project.zotero_status)
+    def _initialize_zotero_results_table(self) -> None:
+        """初始化 Zotero 结果表的固定列。"""
+        table = self.query_one("#zotero-results", DataTable)
+        table.clear(columns=True)
+        table.add_columns("选中", "标题", "所在库", "所在分类")
+
+    def _refresh_zotero_controls(self) -> None:
+        """按当前任务类型刷新 Zotero 导入控件可见性。"""
+        is_arxiv_task = self._selected_task_input_type() == "arxiv"
+        self.query_one("#zotero-import-rule", Rule).display = is_arxiv_task
+        self.query_one("#import-zotero-button", Button).display = is_arxiv_task
+
+    def load_zotero_libraries(self) -> None:
+        """从本地 Zotero API 加载可选库到搜索范围下拉框。"""
+        try:
+            libraries = self._zotero_adapter().list_libraries()
+        except Exception as exc:
+            self.zotero_libraries = []
+            self._set_zotero_status(f"本地 API 不可用：{exc}")
             return
 
-        api_key = self.query_one("#zotero-api-key-input", Input).value.strip()
-        script_path = self.query_one("#zotero-script-path-input", Input).value.strip()
-        library_id = self.query_one("#zotero-library-id-input", Input).value.strip()
-        library_type_select = self.query_one("#zotero-library-type-select", Select)
-        library_type = "" if library_type_select.is_blank() else str(library_type_select.value)
-        item_key = self.query_one("#zotero-item-key-input", Input).value.strip()
-        missing_fields = [
-            field_name
-            for field_name, field_value in (
-                ("API key", api_key),
-                ("adapter script", script_path),
-                ("library_id", library_id),
-                ("library_type", library_type),
-                ("item_key", item_key),
-            )
-            if not field_value
+        self.zotero_libraries = libraries
+        options = [
+            (str(item.get("name") or item.get("library_id")), self._zotero_library_value(item))
+            for item in libraries
         ]
-        if missing_fields:
-            project.zotero_status = f"失败：缺少 {', '.join(missing_fields)}。"
-            status_widget.update(project.zotero_status)
+        select = self.query_one("#zotero-library-select", Select)
+        select.set_options(options)
+        if options:
+            select.value = options[0][1]
+            self._set_zotero_status("")
+        else:
+            self._set_zotero_status("没有可选库。")
+
+    def search_zotero_items(self) -> None:
+        """使用搜索框文本和当前库执行 Zotero 本地 API 搜索。"""
+        query = self.query_one("#zotero-search-input", Input).value.strip()
+        if not query:
+            self._set_zotero_status("搜索框为空。")
+            return
+        library = self._selected_zotero_library()
+        if library is None:
+            self._set_zotero_status("未选择库。")
             return
 
         try:
-            adapter = self.zotero_adapter_factory(api_key, script_path)
-            result = adapter.attach_pdf(item_key, project.pdf_path, library_id, library_type)
+            results = self._zotero_adapter().search_items(
+                query,
+                str(library["library_id"]),
+                str(library["library_type"]),
+            )
         except Exception as exc:
-            project.zotero_status = f"失败：{exc}"
-            status_widget.update(project.zotero_status)
+            self._set_zotero_status(f"搜索失败：{exc}")
             return
 
-        attachment_key = result.get("attachment_key", "")
-        upload_status = result.get("status", "uploaded")
-        project.zotero_status = f"{upload_status}: {attachment_key}".strip()
-        status_widget.update(project.zotero_status)
+        self.populate_zotero_results(results)
+        self._set_zotero_status("搜索无结果。" if not results else f"找到 {len(results)} 个条目。")
+
+    def auto_match_zotero_items(self) -> None:
+        """按当前 arXiv ID 匹配 Zotero 存档 id 字段。"""
+        arxiv_id = self._selected_arxiv_id()
+        if not arxiv_id:
+            self._set_zotero_status("自动匹配缺少 arXiv ID。")
+            return
+        library = self._selected_zotero_library()
+        if library is None:
+            self._set_zotero_status("未选择库。")
+            return
+
+        try:
+            results = self._zotero_adapter().match_items_by_archive_id(
+                arxiv_id,
+                str(library["library_id"]),
+                str(library["library_type"]),
+            )
+        except Exception as exc:
+            self._set_zotero_status(f"自动匹配失败：{exc}")
+            return
+
+        self.populate_zotero_results(results)
+        self._set_zotero_status("搜索无结果。" if not results else f"找到 {len(results)} 个条目。")
+
+    def populate_zotero_results(self, results: list[dict[str, object]]) -> None:
+        """把 Zotero 搜索结果写入固定列数据表，并清空选择。"""
+        self.zotero_results = list(results)
+        self.zotero_selected_keys = set()
+        self._initialize_zotero_results_table()
+        table = self.query_one("#zotero-results", DataTable)
+        for item in self.zotero_results:
+            table.add_row(
+                "[]",
+                str(item.get("title") or ""),
+                str(item.get("library_name") or item.get("library_id") or ""),
+                ", ".join(str(value) for value in item.get("collection_names", []) or []),
+            )
+
+    def clear_zotero_results(self) -> None:
+        """清空当前项目的 Zotero 搜索结果和选择状态。"""
+        self.zotero_results = []
+        self.zotero_selected_keys = set()
+        self._initialize_zotero_results_table()
+
+    def toggle_zotero_row_selection(self, row_index: int) -> None:
+        """切换指定 Zotero 结果行的多选状态。"""
+        if row_index < 0 or row_index >= len(self.zotero_results):
+            return
+        table = self.query_one("#zotero-results", DataTable)
+        item = self.zotero_results[row_index]
+        item_key = str(item.get("item_key") or "")
+        if item_key in self.zotero_selected_keys:
+            self.zotero_selected_keys.remove(item_key)
+            table.update_cell_at((row_index, 0), "[]")
+        else:
+            self.zotero_selected_keys.add(item_key)
+            table.update_cell_at((row_index, 0), "[√]")
+
+    def import_selected_project_to_zotero(self) -> None:
+        """把当前选中项目的译文 PDF 附加到所有选中 Zotero 条目。"""
+        project = self._selected_project()
+        if project is None:
+            self._set_zotero_status("请选择一个项目。")
+            return
+        if not project.pdf_path:
+            project.zotero_status = "失败：当前项目没有 PDF。"
+            self._set_zotero_status(project.zotero_status)
+            return
+
+        selected_items = [
+            item
+            for item in self.zotero_results
+            if str(item.get("item_key") or "") in self.zotero_selected_keys
+        ]
+        if not selected_items:
+            project.zotero_status = "失败：未选择任何条目。"
+            self._set_zotero_status(project.zotero_status)
+            return
+
+        api_key_env = self._zotero_config().get("web_api_key_env", "ZOTERO_API_KEY")
+        api_key = os.environ.get(str(api_key_env), "").strip()
+        if not api_key:
+            project.zotero_status = f"失败：Web API key 环境变量未设置：{api_key_env}。"
+            self._set_zotero_status(project.zotero_status)
+            return
+
+        adapter = self._zotero_adapter(api_key=api_key)
+        success_count = 0
+        failures: list[str] = []
+        for item in selected_items:
+            item_key = str(item.get("item_key") or "")
+            library_id = str(item.get("library_id") or "")
+            library_type = str(item.get("library_type") or "")
+            try:
+                adapter.attach_pdf(item_key, project.pdf_path, library_id, library_type)
+                success_count += 1
+            except Exception as exc:
+                failures.append(f"{item_key}: {exc}")
+
+        project.zotero_status = f"导入完成：成功 {success_count}，失败 {len(failures)}。"
+        if failures:
+            project.zotero_status = f"{project.zotero_status} {'; '.join(failures)}"
+        self._set_zotero_status(project.zotero_status)
+
+    def _set_zotero_status(self, message: str) -> None:
+        """记录 Zotero 操作状态，并在可见 UI 中发出轻量提示。"""
+        project = self._selected_project()
+        if project is not None and message:
+            project.zotero_status = message
+        if message:
+            self.notify(message)
+
+    def _zotero_config(self) -> dict[str, object]:
+        """返回当前 UI 配置中的 Zotero 配置段。"""
+        config = self.current_config or load_ui_config(Path.cwd())
+        zotero_config = config.get("zotero", {}) if isinstance(config, dict) else {}
+        if not isinstance(zotero_config, dict):
+            return {}
+        return zotero_config
+
+    def _zotero_adapter(self, api_key: str = "") -> ZoteroAdapter:
+        """按当前配置创建 Zotero adapter。"""
+        local_api_base = str(self._zotero_config().get("local_api_base", "http://127.0.0.1:23119/api"))
+        try:
+            return self.zotero_adapter_factory(api_key, local_api_base)
+        except TypeError:
+            return self.zotero_adapter_factory(api_key, "")
+
+    def _zotero_library_value(self, library: dict[str, object]) -> str:
+        """返回 Zotero 库下拉框内部值。"""
+        return f"{library.get('library_type')}:{library.get('library_id')}"
+
+    def _selected_zotero_library(self) -> dict[str, object] | None:
+        """返回当前下拉框选中的 Zotero 库数据。"""
+        select = self.query_one("#zotero-library-select", Select)
+        if select.is_blank():
+            return None
+        value = str(select.value)
+        return next((item for item in self.zotero_libraries if self._zotero_library_value(item) == value), None)
+
+    def _selected_task_input_type(self) -> str:
+        """返回当前选中项目所属任务的输入类型。"""
+        if self.selected_project_name is None:
+            return self.current_task.input_type if self.current_task is not None else ""
+        for task, project in self._iter_project_states():
+            if self.selected_task_id is not None and task.task_id != self.selected_task_id:
+                continue
+            if project.project_name == self.selected_project_name:
+                return task.input_type
+        return ""
+
+    def _selected_arxiv_id(self) -> str:
+        """从当前选中项目或任务输入中提取 arXiv ID。"""
+        pattern = re.compile(r"\d{4}\.\d{4,5}(?:v\d+)?")
+        candidates: list[str] = []
+        if self.selected_project_name:
+            candidates.append(self.selected_project_name)
+        if self.current_task is not None:
+            candidates.extend(self.current_task.inputs)
+        for candidate in candidates:
+            match = pattern.search(candidate)
+            if match:
+                return match.group(0)
+        return ""
 
     def start_current_task(self) -> None:
         """通过 Textual worker 启动当前任务。"""

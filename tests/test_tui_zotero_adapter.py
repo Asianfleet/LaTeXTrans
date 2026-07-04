@@ -1,7 +1,5 @@
 """Tests for the Zotero adapter used by the Textual UI."""
 
-import json
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,77 +11,86 @@ from src.tui.zotero_adapter import ZoteroAdapter
 class ZoteroAdapterTests(unittest.TestCase):
     """Verify Zotero CLI delegation and Web API PDF attachment upload."""
 
-    def test_list_libraries_runs_existing_zotero_cli(self):
-        """List libraries through the existing Zotero skill CLI command."""
-        completed = subprocess.CompletedProcess(
-            args=["python"],
-            returncode=0,
-            stdout=json.dumps(
-                {
-                    "command": "list-libraries",
-                    "result": [{"library_id": "1", "library_type": "user"}],
-                }
-            ),
-            stderr="",
+    def test_list_libraries_reads_user_and_group_scopes_from_local_api(self):
+        """List libraries through the configured local Zotero API."""
+        session = Mock()
+        groups_response = Mock()
+        groups_response.json.return_value = [
+            {"id": 42, "data": {"name": "Reading Group"}},
+        ]
+        groups_response.raise_for_status.return_value = None
+        session.get.return_value = groups_response
+
+        result = ZoteroAdapter(
+            api_key="secret",
+            session=session,
+            local_api_base="http://127.0.0.1:23119/api",
+        ).list_libraries()
+
+        self.assertEqual(
+            result,
+            [
+                {"library_id": "0", "library_type": "user", "name": "用户库"},
+                {"library_id": "42", "library_type": "group", "name": "Reading Group"},
+            ],
         )
-        with patch("subprocess.run", return_value=completed) as run_mock:
-            result = ZoteroAdapter(
-                python_cmd=["python"],
-                script_path="zotero.py",
-                api_key="secret",
-            ).list_libraries()
+        self.assertEqual(session.get.call_args.args[0], "http://127.0.0.1:23119/api/users/0/groups")
 
-        self.assertEqual(result[0]["library_id"], "1")
-        self.assertIn("list-libraries", run_mock.call_args.args[0])
-
-    def test_search_items_passes_selected_library_to_existing_zotero_cli(self):
+    def test_search_items_passes_selected_library_to_local_api(self):
         """Search items with the selected explicit Zotero library scope."""
-        completed = subprocess.CompletedProcess(
-            args=["python"],
-            returncode=0,
-            stdout=json.dumps(
-                {
-                    "command": "search-items",
-                    "result": [{"key": "ITEM123", "title": "Paper"}],
-                }
-            ),
-            stderr="",
+        session = Mock()
+        items_response = Mock()
+        items_response.json.return_value = [
+            {
+                "key": "ITEM123",
+                "data": {
+                    "title": "Paper",
+                    "collections": ["COLL1"],
+                    "archiveLocation": "arXiv:2508.18791",
+                },
+                "library": {"id": 42, "type": "group", "name": "Reading Group"},
+            }
+        ]
+        items_response.raise_for_status.return_value = None
+        collections_response = Mock()
+        collections_response.json.return_value = [
+            {"key": "COLL1", "data": {"name": "Inbox"}},
+        ]
+        collections_response.raise_for_status.return_value = None
+        session.get.side_effect = [items_response, collections_response]
+
+        result = ZoteroAdapter(api_key="secret", session=session).search_items("Paper", "42", "group")
+
+        self.assertEqual(result[0]["item_key"], "ITEM123")
+        self.assertEqual(result[0]["title"], "Paper")
+        self.assertEqual(result[0]["library_id"], "42")
+        self.assertEqual(result[0]["library_type"], "group")
+        self.assertEqual(result[0]["library_name"], "Reading Group")
+        self.assertEqual(result[0]["collection_names"], ["Inbox"])
+        self.assertEqual(session.get.call_args_list[0].args[0], "http://127.0.0.1:23119/api/groups/42/items")
+        self.assertEqual(session.get.call_args_list[0].kwargs["params"]["q"], "Paper")
+        self.assertEqual(session.get.call_args_list[1].args[0], "http://127.0.0.1:23119/api/groups/42/collections")
+
+    def test_match_items_by_archive_id_filters_archive_location_locally(self):
+        """Auto-match returns items whose archive ID contains the current arXiv ID."""
+        session = Mock()
+        response = Mock()
+        response.json.return_value = [
+            {"key": "MATCH", "data": {"title": "Match", "archiveLocation": "arXiv:2508.18791"}},
+            {"key": "MISS", "data": {"title": "Miss", "archiveLocation": "arXiv:2407.01648"}},
+        ]
+        response.raise_for_status.return_value = None
+        session.get.return_value = response
+
+        result = ZoteroAdapter(api_key="secret", session=session).match_items_by_archive_id(
+            "2508.18791",
+            "7",
+            "user",
         )
-        with patch("subprocess.run", return_value=completed) as run_mock:
-            result = ZoteroAdapter(
-                python_cmd=["python"],
-                script_path="zotero.py",
-                api_key="secret",
-            ).search_items("Paper", "42", "group")
 
-        command = run_mock.call_args.args[0]
-        self.assertEqual(result[0]["key"], "ITEM123")
-        self.assertIn("--library-id", command)
-        self.assertIn("42", command)
-        self.assertIn("--library-type", command)
-        self.assertIn("group", command)
-
-    def test_run_cli_json_returns_result_from_zotero_cli_envelope(self):
-        """Parse the real Zotero CLI JSON envelope and return only result data."""
-        completed = subprocess.CompletedProcess(
-            args=["python"],
-            returncode=0,
-            stdout=json.dumps(
-                {
-                    "command": "list-libraries",
-                    "result": [{"library_id": "42", "library_type": "group"}],
-                }
-            ),
-            stderr="",
-        )
-        with patch("subprocess.run", return_value=completed):
-            result = ZoteroAdapter(
-                python_cmd=["python"],
-                script_path="zotero.py",
-                api_key="secret",
-            )._run_cli_json(["list-libraries"])
-
-        self.assertEqual(result, [{"library_id": "42", "library_type": "group"}])
+        self.assertEqual([item["item_key"] for item in result], ["MATCH"])
+        self.assertEqual(session.get.call_args_list[0].args[0], "http://127.0.0.1:23119/api/users/7/items")
+        self.assertEqual(session.get.call_args_list[1].args[0], "http://127.0.0.1:23119/api/users/7/collections")
 
     def test_attach_pdf_creates_child_attachment_and_uploads_file(self):
         """Attach a translated PDF through child attachment and upload requests."""

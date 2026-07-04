@@ -72,12 +72,14 @@ CONFIG_FIELDS: tuple[ConfigField, ...] = (
     ConfigField(("llm_config", "model"), "模型", "input", "LLM", ""),
     ConfigField(("llm_config", "api_key_env"), "API key 环境变量", "input", "LLM", ""),
     ConfigField(("llm_config", "base_url"), "接口地址", "input", "LLM", ""),
+    ConfigField(("zotero", "local_api_base"), "Zotero 本地 API", "input", "Zotero", "http://127.0.0.1:23119/api"),
+    ConfigField(("zotero", "web_api_key_env"), "Zotero Web API key 环境变量", "input", "Zotero", "ZOTERO_API_KEY"),
 )
 
 
 def grouped_config_fields() -> list[tuple[str, list[ConfigField]]]:
     """按设置页展示顺序返回字段分组。"""
-    sections = ["基础", "术语", "校验", "LLM"]
+    sections = ["基础", "术语", "校验", "LLM", "Zotero"]
     return [
         (section, [field for field in CONFIG_FIELDS if field.section == section])
         for section in sections

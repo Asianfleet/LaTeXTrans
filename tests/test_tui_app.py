@@ -13,6 +13,7 @@ from textual.widgets import (
     ListView,
     ProgressBar,
     RichLog,
+    Rule,
     Select,
     Static,
     Switch,
@@ -87,16 +88,25 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
             detail = app.query_one("#detail")
             self.assertEqual([child.id for child in detail.children], ["detail-tabs"])
             zotero_tab = app.query_one("#zotero-tab")
-            for selector in [
-                "#zotero-api-key-input",
-                "#zotero-script-path-input",
-                "#zotero-library-id-input",
-                "#zotero-library-type-select",
-                "#zotero-item-key-input",
-                "#zotero-status",
-                "#import-zotero-button",
-            ]:
-                self.assertIsNotNone(zotero_tab.query_one(selector))
+            self.assertEqual([child.id for child in zotero_tab.children], ["zotero-controls", "zotero-results"])
+            self.assertEqual(
+                [child.id for child in app.query_one("#zotero-controls").children],
+                [
+                    "zotero-library-select",
+                    "zotero-search-input",
+                    "zotero-search-button",
+                    "zotero-auto-match-button",
+                    "zotero-import-rule",
+                    "import-zotero-button",
+                ],
+            )
+            self.assertIsNotNone(app.query_one("#zotero-library-select", Select))
+            self.assertIsNotNone(app.query_one("#zotero-search-input", Input))
+            self.assertIsNotNone(app.query_one("#zotero-search-button", Button))
+            self.assertIsNotNone(app.query_one("#zotero-auto-match-button", Button))
+            self.assertIsNotNone(app.query_one("#zotero-import-rule", Rule))
+            self.assertIsNotNone(app.query_one("#import-zotero-button", Button))
+            self.assertIsNotNone(app.query_one("#zotero-results", DataTable))
             with self.assertRaises(NoMatches):
                 app.query_one("#detail-paths")
             with self.assertRaises(NoMatches):
@@ -392,6 +402,10 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
                 "api_key_env": "DEEPSEEK_API_KEY",
                 "base_url": "https://api.deepseek.com/chat/completions",
             },
+            "zotero": {
+                "local_api_base": "http://127.0.0.1:23119/api",
+                "web_api_key_env": "ZOTERO_API_KEY",
+            },
         }
         async with app.run_test() as pilot:
             with patch("src.tui.app.load_ui_config", return_value=config):
@@ -405,7 +419,13 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(app.query_one("#config-update_term", Switch).value)
             self.assertEqual(app.query_one("#config-validation-issues-placeholder_mismatch-severity", Select).value, "warning")
             self.assertFalse(app.query_one("#config-validation-issues-placeholder_mismatch-retryable", Switch).value)
+            self.assertEqual(
+                app.query_one("#config-zotero-local_api_base", Input).value,
+                "http://127.0.0.1:23119/api",
+            )
+            self.assertEqual(app.query_one("#config-zotero-web_api_key_env", Input).value, "ZOTERO_API_KEY")
             self.assertIn('target_language = "ja"', app.query_one("#config-preview", TextArea).text)
+            self.assertIn("[zotero]", app.query_one("#config-preview", TextArea).text)
             with self.assertRaises(NoMatches):
                 app.query_one("#config-sys_name", Input)
             with self.assertRaises(NoMatches):
@@ -461,6 +481,10 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
                 },
             },
             "llm_config": {"model": "deepseek-v4-flash", "api_key_env": "DEEPSEEK_API_KEY", "base_url": ""},
+            "zotero": {
+                "local_api_base": "http://127.0.0.1:23119/api",
+                "web_api_key_env": "ZOTERO_API_KEY",
+            },
         }
         async with app.run_test():
             with patch("src.tui.app.load_ui_config", return_value=config):
@@ -476,6 +500,8 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             app.query_one("#config-validation-issues-command_mismatch-severity", Select).value = "warning"
             app.query_one("#config-validation-issues-command_mismatch-retryable", Switch).value = False
             app.query_one("#config-llm_config-model", Input).value = "model-x"
+            app.query_one("#config-zotero-local_api_base", Input).value = "http://localhost:23119/api"
+            app.query_one("#config-zotero-web_api_key_env", Input).value = "MY_ZOTERO_API_KEY"
             with patch("src.tui.app.save_ui_config") as save_config:
                 app.persist_config_form_change()
 
@@ -492,6 +518,8 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved["validation"]["issues"]["command_mismatch"]["severity"], "warning")
             self.assertFalse(saved["validation"]["issues"]["command_mismatch"]["retryable"])
             self.assertEqual(saved["llm_config"]["model"], "model-x")
+            self.assertEqual(saved["zotero"]["local_api_base"], "http://localhost:23119/api")
+            self.assertEqual(saved["zotero"]["web_api_key_env"], "MY_ZOTERO_API_KEY")
             self.assertIn('target_language = "fr"', app.query_one("#config-preview", TextArea).text)
 
     async def test_config_change_rejects_invalid_integer_fields(self):
@@ -759,36 +787,249 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
 class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
     """验证 Zotero tab 能对选中项目的 PDF 调用 adapter 并反馈状态。"""
 
-    async def test_import_zotero_button_attaches_selected_project_pdf(self):
-        """确认 Zotero tab 按钮会用显式条目信息附加当前项目 PDF。"""
+    async def test_refresh_detail_page_hides_import_controls_for_non_arxiv_task(self):
+        """确认非 arXiv 任务不显示竖向 Rule 和导入按钮。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
-        adapter = Mock()
-        adapter.attach_pdf.return_value = {"attachment_key": "ATTACH1", "status": "uploaded"}
 
         async with app.run_test():
-            app.zotero_adapter_factory = lambda api_key, script_path: adapter
             app.current_task = TaskViewState(input_type="local", inputs=["paper"])
+            app.current_task.projects.append(ProjectViewState(project_name="paper", status=ProjectStatus.COMPLETED))
+            app.selected_project_name = "paper"
+
+            app.refresh_detail_page()
+
+            self.assertFalse(app.query_one("#zotero-import-rule", Rule).display)
+            self.assertFalse(app.query_one("#import-zotero-button", Button).display)
+
+    async def test_zotero_results_table_uses_fixed_columns(self):
+        """确认 Zotero 结果表固定展示四列。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+
+        async with app.run_test():
+            table = app.query_one("#zotero-results", DataTable)
+
+            self.assertEqual([str(column.label) for column in table.ordered_columns], ["选中", "标题", "所在库", "所在分类"])
+
+    async def test_load_zotero_libraries_populates_search_scope_select(self):
+        """确认 Zotero 库 select 来自 adapter 的本地 API 库列表。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        adapter = Mock()
+        adapter.list_libraries.return_value = [
+            {"library_id": "7", "library_type": "user", "name": "Ada"},
+            {"library_id": "42", "library_type": "group", "name": "Reading Group"},
+        ]
+
+        async with app.run_test():
+            app.zotero_adapter_factory = lambda api_key, local_api_base: adapter
+            app.current_config = {
+                "zotero": {
+                    "local_api_base": "http://127.0.0.1:23119/api",
+                    "web_api_key_env": "ZOTERO_API_KEY",
+                }
+            }
+
+            app.load_zotero_libraries()
+
+            select = app.query_one("#zotero-library-select", Select)
+            self.assertEqual(select.value, "user:7")
+            self.assertEqual(app.zotero_libraries[1]["library_type"], "group")
+
+    async def test_activating_zotero_tab_loads_libraries(self):
+        """确认打开 Zotero tab 时会自动加载可选库。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        event = Mock()
+        event.tabbed_content.id = "detail-tabs"
+        event.pane.id = "zotero-tab"
+
+        async with app.run_test():
+            with patch.object(app, "load_zotero_libraries") as load_libraries:
+                app.on_tabbed_content_tab_activated(event)
+
+        load_libraries.assert_called_once_with()
+
+    async def test_search_zotero_items_populates_unselected_rows(self):
+        """确认搜索按钮使用当前库和搜索框，并把结果默认设为未选中。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        adapter = Mock()
+        adapter.search_items.return_value = [
+            {
+                "item_key": "ITEM1",
+                "title": "Paper",
+                "library_id": "42",
+                "library_type": "group",
+                "library_name": "Reading Group",
+                "collection_names": ["Inbox"],
+            }
+        ]
+
+        async with app.run_test():
+            app.zotero_adapter_factory = lambda api_key, local_api_base: adapter
+            app.zotero_libraries = [{"library_id": "42", "library_type": "group", "name": "Reading Group"}]
+            app.query_one("#zotero-library-select", Select).set_options([("Reading Group", "group:42")])
+            app.query_one("#zotero-library-select", Select).value = "group:42"
+            app.query_one("#zotero-search-input", Input).value = "Paper"
+
+            app.search_zotero_items()
+
+            adapter.search_items.assert_called_once_with("Paper", "42", "group")
+            table = app.query_one("#zotero-results", DataTable)
+            self.assertEqual(table.row_count, 1)
+            self.assertEqual(table.get_cell_at((0, 0)), "[]")
+            self.assertEqual(table.get_cell_at((0, 1)), "Paper")
+
+    async def test_search_input_enter_triggers_search(self):
+        """确认搜索框回车触发搜索。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        event = Mock()
+        event.input.id = "zotero-search-input"
+
+        async with app.run_test():
+            with patch.object(app, "search_zotero_items") as search:
+                app.on_input_submitted(event)
+
+        search.assert_called_once_with()
+
+    async def test_auto_match_uses_archive_id_from_arxiv_task(self):
+        """确认自动匹配使用当前任务 arXiv ID 搜索存档 id。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        adapter = Mock()
+        adapter.match_items_by_archive_id.return_value = [
+            {
+                "item_key": "ITEM1",
+                "title": "Matched",
+                "library_id": "7",
+                "library_type": "user",
+                "library_name": "Ada",
+                "collection_names": [],
+            }
+        ]
+
+        async with app.run_test():
+            app.zotero_adapter_factory = lambda api_key, local_api_base: adapter
+            app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
+            app.current_task.projects.append(ProjectViewState(project_name="2508.18791", status=ProjectStatus.COMPLETED))
+            app.selected_project_name = "2508.18791"
+            app.zotero_libraries = [{"library_id": "7", "library_type": "user", "name": "Ada"}]
+            app.query_one("#zotero-library-select", Select).set_options([("Ada", "user:7")])
+            app.query_one("#zotero-library-select", Select).value = "user:7"
+
+            app.auto_match_zotero_items()
+
+            adapter.match_items_by_archive_id.assert_called_once_with("2508.18791", "7", "user")
+            self.assertEqual(app.query_one("#zotero-results", DataTable).get_cell_at((0, 1)), "Matched")
+
+    async def test_toggle_zotero_row_selection_switches_marker(self):
+        """确认点击结果行会在 [] 和 [√] 间切换。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+
+        async with app.run_test():
+            app.populate_zotero_results(
+                [
+                    {
+                        "item_key": "ITEM1",
+                        "title": "Paper",
+                        "library_id": "7",
+                        "library_type": "user",
+                        "library_name": "Ada",
+                        "collection_names": [],
+                    }
+                ]
+            )
+
+            app.toggle_zotero_row_selection(0)
+            self.assertEqual(app.query_one("#zotero-results", DataTable).get_cell_at((0, 0)), "[√]")
+            app.toggle_zotero_row_selection(0)
+            self.assertEqual(app.query_one("#zotero-results", DataTable).get_cell_at((0, 0)), "[]")
+
+    async def test_select_project_clears_zotero_rows_and_selection(self):
+        """确认切换项目时清空旧项目的 Zotero 搜索结果和勾选状态。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+
+        async with app.run_test():
+            task = TaskViewState(input_type="arxiv", inputs=["2508.18791", "2407.01648"], task_id="task")
+            task.projects.append(ProjectViewState(project_name="2508.18791", status=ProjectStatus.COMPLETED))
+            task.projects.append(ProjectViewState(project_name="2407.01648", status=ProjectStatus.COMPLETED))
+            app.current_task = task
+            app.tasks = [task]
+            app.selected_project_name = "2508.18791"
+            app.populate_zotero_results(
+                [
+                    {
+                        "item_key": "ITEM1",
+                        "title": "Paper",
+                        "library_id": "7",
+                        "library_type": "user",
+                        "library_name": "用户库",
+                        "collection_names": [],
+                    }
+                ]
+            )
+            app.toggle_zotero_row_selection(0)
+
+            app.select_project("2407.01648", "task")
+
+            self.assertEqual(app.zotero_results, [])
+            self.assertEqual(app.zotero_selected_keys, set())
+            self.assertEqual(app.query_one("#zotero-results", DataTable).row_count, 0)
+
+    async def test_import_zotero_button_attaches_selected_project_pdf(self):
+        """确认导入按钮对每个选中条目附加当前项目 PDF。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        adapter = Mock()
+        adapter.attach_pdf.side_effect = [
+            {"attachment_key": "ATTACH1", "status": "uploaded"},
+            {"attachment_key": "ATTACH2", "status": "uploaded"},
+        ]
+
+        async with app.run_test():
+            app.zotero_adapter_factory = lambda api_key, local_api_base: adapter
+            app.current_config = {
+                "zotero": {
+                    "local_api_base": "http://127.0.0.1:23119/api",
+                    "web_api_key_env": "ZOTERO_API_KEY",
+                }
+            }
+            app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
             app.current_task.projects.append(
                 ProjectViewState(
-                    project_name="paper",
+                    project_name="2508.18791",
                     status=ProjectStatus.COMPLETED,
                     pdf_path=r"D:\out\paper.pdf",
                 )
             )
-            app.selected_project_name = "paper"
+            app.selected_project_name = "2508.18791"
             app.switch_page(PAGE_DETAIL)
-            app.query_one("#zotero-api-key-input", Input).value = "ui-key"
-            app.query_one("#zotero-script-path-input", Input).value = "zotero.py"
-            app.query_one("#zotero-library-id-input", Input).value = "42"
-            app.query_one("#zotero-library-type-select", Select).value = "group"
-            app.query_one("#zotero-item-key-input", Input).value = "ITEM123"
+            with patch.dict("os.environ", {"ZOTERO_API_KEY": "ui-key"}):
+                app.populate_zotero_results(
+                    [
+                        {
+                            "item_key": "ITEM123",
+                            "title": "Paper 1",
+                            "library_id": "42",
+                            "library_type": "group",
+                            "library_name": "Reading Group",
+                            "collection_names": ["Inbox"],
+                        },
+                        {
+                            "item_key": "ITEM456",
+                            "title": "Paper 2",
+                            "library_id": "7",
+                            "library_type": "user",
+                            "library_name": "Ada",
+                            "collection_names": [],
+                        },
+                    ]
+                )
+                app.toggle_zotero_row_selection(0)
+                app.toggle_zotero_row_selection(1)
 
-            app.import_selected_project_to_zotero()
+                app.import_selected_project_to_zotero()
 
-            adapter.attach_pdf.assert_called_once_with("ITEM123", r"D:\out\paper.pdf", "42", "group")
+            self.assertEqual(adapter.attach_pdf.call_count, 2)
+            adapter.attach_pdf.assert_any_call("ITEM123", r"D:\out\paper.pdf", "42", "group")
+            adapter.attach_pdf.assert_any_call("ITEM456", r"D:\out\paper.pdf", "7", "user")
             project = app.current_task.projects[0]
-            self.assertEqual(project.zotero_status, "uploaded: ATTACH1")
-            self.assertIn("uploaded", str(app.query_one("#zotero-status", Static).content))
+            self.assertEqual(project.zotero_status, "导入完成：成功 2，失败 0。")
 
     async def test_import_zotero_button_reports_failure_without_changing_task_result(self):
         """确认 Zotero 导入失败会展示错误，但不改变翻译完成状态。"""
@@ -797,31 +1038,45 @@ class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
         adapter.attach_pdf.side_effect = RuntimeError("zotero failed")
 
         async with app.run_test():
-            app.zotero_adapter_factory = lambda api_key, script_path: adapter
-            app.current_task = TaskViewState(input_type="local", inputs=["paper"])
+            app.zotero_adapter_factory = lambda api_key, local_api_base: adapter
+            app.current_config = {
+                "zotero": {
+                    "local_api_base": "http://127.0.0.1:23119/api",
+                    "web_api_key_env": "ZOTERO_API_KEY",
+                }
+            }
+            app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
             app.current_task.projects.append(
                 ProjectViewState(
-                    project_name="paper",
+                    project_name="2508.18791",
                     status=ProjectStatus.COMPLETED,
                     pdf_path=r"D:\out\paper.pdf",
                 )
             )
             app.current_task.completed = 1
-            app.selected_project_name = "paper"
+            app.selected_project_name = "2508.18791"
             app.switch_page(PAGE_DETAIL)
-            app.query_one("#zotero-api-key-input", Input).value = "ui-key"
-            app.query_one("#zotero-script-path-input", Input).value = "zotero.py"
-            app.query_one("#zotero-library-id-input", Input).value = "42"
-            app.query_one("#zotero-library-type-select", Select).value = "group"
-            app.query_one("#zotero-item-key-input", Input).value = "ITEM123"
+            app.populate_zotero_results(
+                [
+                    {
+                        "item_key": "ITEM123",
+                        "title": "Paper",
+                        "library_id": "42",
+                        "library_type": "group",
+                        "library_name": "Reading Group",
+                        "collection_names": [],
+                    }
+                ]
+            )
+            app.toggle_zotero_row_selection(0)
 
-            app.import_selected_project_to_zotero()
+            with patch.dict("os.environ", {"ZOTERO_API_KEY": "ui-key"}):
+                app.import_selected_project_to_zotero()
 
             project = app.current_task.projects[0]
             self.assertEqual(project.status, ProjectStatus.COMPLETED)
             self.assertEqual(app.current_task.completed, 1)
-            self.assertIn("失败", project.zotero_status)
-            self.assertIn("zotero failed", str(app.query_one("#zotero-status", Static).content))
+            self.assertIn("失败 1", project.zotero_status)
 
     async def test_import_zotero_button_branch_calls_import_method(self):
         """确认 Zotero tab 按钮分支会同步调用导入方法。"""
