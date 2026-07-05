@@ -411,28 +411,33 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             },
         }
         async with app.run_test() as pilot:
-            with patch("src.tui.app.load_ui_config", return_value=config):
-                await pilot.click("#settings-button")
+            with patch("src.tui.app.save_ui_config"):
+                with patch("src.tui.app.load_ui_config", return_value=config):
+                    await pilot.click("#settings-button")
+                await pilot.pause()
 
-            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_CONFIG)
-            self.assertIsNotNone(app.query_one("#config-tabs", TabbedContent))
-            self.assertEqual(app.query_one("#config-target_language", Select).value, "ja")
-            self.assertEqual(app.query_one("#config-source_language", Select).value, "en")
-            self.assertEqual(app.query_one("#config-paper_list", TextArea).text, "2508.18791\n2407.01648")
-            self.assertTrue(app.query_one("#config-update_term", Switch).value)
-            self.assertEqual(app.query_one("#config-validation-issues-placeholder_mismatch-severity", Select).value, "warning")
-            self.assertFalse(app.query_one("#config-validation-issues-placeholder_mismatch-retryable", Switch).value)
-            self.assertEqual(
-                app.query_one("#config-zotero-local_api_base", Input).value,
-                "http://127.0.0.1:23119/api",
-            )
-            self.assertEqual(app.query_one("#config-zotero-web_api_key_env", Input).value, "ZOTERO_API_KEY")
-            self.assertIn('target_language = "ja"', app.query_one("#config-preview", TextArea).text)
-            self.assertIn("[zotero]", app.query_one("#config-preview", TextArea).text)
-            with self.assertRaises(NoMatches):
-                app.query_one("#config-sys_name", Input)
-            with self.assertRaises(NoMatches):
-                app.query_one("#config-version", Input)
+                self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_CONFIG)
+                self.assertIsNotNone(app.query_one("#config-tabs", TabbedContent))
+                self.assertEqual(app.query_one("#config-target_language", Select).value, "ja")
+                self.assertEqual(app.query_one("#config-source_language", Select).value, "en")
+                self.assertEqual(app.query_one("#config-paper_list", TextArea).text, "2508.18791\n2407.01648")
+                self.assertTrue(app.query_one("#config-update_term", Switch).value)
+                self.assertEqual(
+                    app.query_one("#config-validation-issues-placeholder_mismatch-severity", Select).value,
+                    "warning",
+                )
+                self.assertFalse(app.query_one("#config-validation-issues-placeholder_mismatch-retryable", Switch).value)
+                self.assertEqual(
+                    app.query_one("#config-zotero-local_api_base", Input).value,
+                    "http://127.0.0.1:23119/api",
+                )
+                self.assertEqual(app.query_one("#config-zotero-web_api_key_env", Input).value, "ZOTERO_API_KEY")
+                self.assertIn('target_language = "ja"', app.query_one("#config-preview", TextArea).text)
+                self.assertIn("[zotero]", app.query_one("#config-preview", TextArea).text)
+                with self.assertRaises(NoMatches):
+                    app.query_one("#config-sys_name", Input)
+                with self.assertRaises(NoMatches):
+                    app.query_one("#config-version", Input)
 
     async def test_config_page_has_no_manual_save_or_reload_buttons(self):
         """确认配置页不再提供保存或重载按钮，避免手动保存语义漂移。"""
@@ -490,25 +495,26 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             },
         }
         async with app.run_test() as pilot:
-            with patch("src.tui.app.load_ui_config", return_value=config):
-                app.load_config_page()
-
-            app.query_one("#config-target_language", Select).value = "fr"
-            app.query_one("#config-source_language", Select).value = "de"
-            app.query_one("#config-paper_list", TextArea).text = "2508.18791\n2407.01648\n"
-            app.query_one("#config-category", TextArea).text = '{"cs": ["cs.LG"]}'
-            app.query_one("#config-update_term", Switch).value = True
-            app.query_one("#config-terminology-max_llm_candidates", Input).value = "12"
-            app.query_one("#config-validation-retry-max_attempts", Input).value = "2"
-            app.query_one("#config-validation-issues-command_mismatch-severity", Select).value = "warning"
-            app.query_one("#config-validation-issues-command_mismatch-retryable", Switch).value = False
-            app.query_one("#config-llm_config-model", Input).value = "model-x"
-            app.query_one("#config-zotero-local_api_base", Input).value = "http://localhost:23119/api"
-            app.query_one("#config-zotero-web_api_key_env", Input).value = "MY_ZOTERO_API_KEY"
             with patch("src.tui.app.save_ui_config") as save_config:
+                with patch("src.tui.app.load_ui_config", return_value=config):
+                    app.load_config_page()
+
+                app.query_one("#config-target_language", Select).value = "fr"
+                app.query_one("#config-source_language", Select).value = "de"
+                app.query_one("#config-paper_list", TextArea).text = "2508.18791\n2407.01648\n"
+                app.query_one("#config-category", TextArea).text = '{"cs": ["cs.LG"]}'
+                app.query_one("#config-update_term", Switch).value = True
+                app.query_one("#config-terminology-max_llm_candidates", Input).value = "12"
+                app.query_one("#config-validation-retry-max_attempts", Input).value = "2"
+                app.query_one("#config-validation-issues-command_mismatch-severity", Select).value = "warning"
+                app.query_one("#config-validation-issues-command_mismatch-retryable", Switch).value = False
+                app.query_one("#config-llm_config-model", Input).value = "model-x"
+                app.query_one("#config-zotero-local_api_base", Input).value = "http://localhost:23119/api"
+                app.query_one("#config-zotero-web_api_key_env", Input).value = "MY_ZOTERO_API_KEY"
                 app.persist_config_form_change()
 
-            saved = save_config.call_args.args[1]
+                saved = save_config.call_args.args[1]
+                await pilot.pause()
             self.assertEqual(saved["sys_name"], "LaTeXTransPlus")
             self.assertEqual(saved["version"], "0.1.0")
             self.assertEqual(saved["target_language"], "fr")
