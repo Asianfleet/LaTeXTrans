@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -747,8 +748,219 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("compile ok", str(app.query_one("#project-log-summary", Static).content))
                 errors_table = app.query_one("#errors-table", DataTable)
                 self.assertEqual(errors_table.row_count, 1)
-                self.assertEqual(errors_table.get_cell_at((0, 0)), str(project_dir / "errors.md"))
-                self.assertEqual(errors_table.get_cell_at((0, 1)), "compile failed")
+                self.assertEqual(
+                    [str(column.label) for column in errors_table.ordered_columns],
+                    ["位置", "类型", "问题", "状态", "原文", "译文"],
+                )
+                self.assertEqual(errors_table.get_cell_at((0, 0)), "项目 -")
+                self.assertEqual(errors_table.get_cell_at((0, 1)), "项目")
+                self.assertEqual(errors_table.get_cell_at((0, 2)).plain, "compile failed")
+                self.assertEqual(errors_table.get_cell_at((0, 3)).plain, "未解决")
+
+    async def test_refresh_detail_page_populates_error_report_content_status_and_truncates_text(self):
+        """确认错误记录 tab 展示内容、状态颜色，并截断原文和译文。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            source = "Original source " + ("A" * 160)
+            translation = "Translated content " + ("B" * 160)
+            (project_dir / "sections_map.json").write_text(
+                json.dumps(
+                    [
+                        {"section": "1", "content": source, "trans_content": translation},
+                        {"section": "2", "content": "Fixed source", "trans_content": "Fixed translation"},
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (project_dir / "captions_map.json").write_text("[]", encoding="utf-8")
+            (project_dir / "envs_map.json").write_text("[]", encoding="utf-8")
+            initial_report = [
+                {
+                    "part": "sec",
+                    "num_or_ph": "1",
+                    "severity": "error",
+                    "issues": [{"type": "placeholder_mismatch", "message": "Missing placeholder"}],
+                },
+                {
+                    "part": "sec",
+                    "num_or_ph": "2",
+                    "severity": "error",
+                    "issues": [{"type": "command_mismatch", "message": "Missing command"}],
+                },
+            ]
+            final_report = [initial_report[0]]
+            (project_dir / "initial_errors_report.json").write_text(
+                json.dumps(initial_report, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            errors_path = project_dir / "errors_report.json"
+            errors_path.write_text(json.dumps(final_report, ensure_ascii=False), encoding="utf-8")
+
+            async with app.run_test() as pilot:
+                app.current_task = TaskViewState(input_type="local", inputs=[str(project_dir)])
+                app.current_task.projects.append(
+                    ProjectViewState(
+                        project_name="paper",
+                        status=ProjectStatus.FAILED,
+                        project_dir=str(project_dir),
+                        output_dir=str(project_dir),
+                        errors_report_path=str(errors_path),
+                    )
+                )
+                app.selected_project_name = "paper"
+                app.switch_page(PAGE_DETAIL)
+
+                app.refresh_detail_page()
+                await pilot.pause()
+
+                errors_table = app.query_one("#errors-table", DataTable)
+                self.assertEqual(
+                    [str(column.label) for column in errors_table.ordered_columns],
+                    ["位置", "类型", "问题", "状态", "原文", "译文"],
+                )
+                self.assertEqual(errors_table.row_count, 2)
+                unresolved_status = errors_table.get_cell_at((0, 3))
+                resolved_status = errors_table.get_cell_at((1, 3))
+                self.assertIsInstance(unresolved_status, Text)
+                self.assertIsInstance(resolved_status, Text)
+                self.assertEqual(unresolved_status.plain, "未解决")
+                self.assertEqual(resolved_status.plain, "已解决")
+                self.assertEqual(str(unresolved_status.style), "yellow")
+                self.assertEqual(str(resolved_status.style), "green")
+                self.assertTrue(errors_table.get_cell_at((0, 4)).plain.endswith("..."))
+                self.assertTrue(errors_table.get_cell_at((0, 5)).plain.endswith("..."))
+                self.assertNotIn("A" * 80, errors_table.get_cell_at((0, 4)).plain)
+                self.assertNotIn("B" * 80, errors_table.get_cell_at((0, 5)).plain)
+                render_width = sum(column.get_render_width(errors_table) for column in errors_table.ordered_columns)
+                self.assertLessEqual(render_width, errors_table.size.width or 80)
+
+    async def test_errors_table_uses_available_detail_width_when_hidden(self):
+        """确认错误记录 tab 隐藏刷新时仍按详情页可用宽度分配列宽。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            (project_dir / "sections_map.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "section": "1",
+                            "content": "Original source " + ("A" * 160),
+                            "trans_content": "Translated content " + ("B" * 160),
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (project_dir / "captions_map.json").write_text("[]", encoding="utf-8")
+            (project_dir / "envs_map.json").write_text("[]", encoding="utf-8")
+            errors_path = project_dir / "errors_report.json"
+            errors_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "part": "sec",
+                            "num_or_ph": "1",
+                            "issues": [{"type": "command_mismatch", "message": "Missing command"}],
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.current_task = TaskViewState(input_type="local", inputs=[str(project_dir)])
+                app.current_task.projects.append(
+                    ProjectViewState(
+                        project_name="paper",
+                        status=ProjectStatus.FAILED,
+                        project_dir=str(project_dir),
+                        output_dir=str(project_dir),
+                        errors_report_path=str(errors_path),
+                    )
+                )
+                app.selected_project_name = "paper"
+
+                app.refresh_detail_page()
+                await pilot.pause()
+                errors_table = app.query_one("#errors-table", DataTable)
+                hidden_width = sum(column.get_render_width(errors_table) for column in errors_table.ordered_columns)
+                self.assertGreater(hidden_width, 80)
+
+                app.query_one("#detail-tabs", TabbedContent).active = "errors-tab"
+                await pilot.pause()
+                event = Mock()
+                event.tabbed_content.id = "detail-tabs"
+                event.pane.id = "errors-tab"
+                app.on_tabbed_content_tab_activated(event)
+                await pilot.pause()
+
+                visible_width = sum(column.get_render_width(errors_table) for column in errors_table.ordered_columns)
+                self.assertLessEqual(visible_width, app._errors_table_available_width(errors_table))
+
+    async def test_errors_table_recomputes_columns_after_terminal_resize(self):
+        """确认终端宽度变化时错误记录表会按新宽度重新分配列宽。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        with TemporaryDirectory() as temp_dir:
+            project_dir = Path(temp_dir)
+            (project_dir / "sections_map.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "section": "1",
+                            "content": "Original source " + ("A" * 160),
+                            "trans_content": "Translated content " + ("B" * 160),
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (project_dir / "captions_map.json").write_text("[]", encoding="utf-8")
+            (project_dir / "envs_map.json").write_text("[]", encoding="utf-8")
+            errors_path = project_dir / "errors_report.json"
+            errors_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "part": "sec",
+                            "num_or_ph": "1",
+                            "issues": [{"type": "command_mismatch", "message": "Missing command"}],
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            async with app.run_test(size=(80, 40)) as pilot:
+                app.current_task = TaskViewState(input_type="local", inputs=[str(project_dir)])
+                app.current_task.projects.append(
+                    ProjectViewState(
+                        project_name="paper",
+                        status=ProjectStatus.FAILED,
+                        project_dir=str(project_dir),
+                        output_dir=str(project_dir),
+                        errors_report_path=str(errors_path),
+                    )
+                )
+                app.selected_project_name = "paper"
+                app.switch_page(PAGE_DETAIL)
+                app.query_one("#detail-tabs", TabbedContent).active = "errors-tab"
+
+                app.refresh_detail_page()
+                await pilot.pause()
+                errors_table = app.query_one("#errors-table", DataTable)
+                narrow_source_width = errors_table.ordered_columns[4].width
+
+                await pilot.resize_terminal(140, 40)
+                await pilot.pause()
+
+                wide_source_width = errors_table.ordered_columns[4].width
+                self.assertGreater(wide_source_width, narrow_source_width)
 
     async def test_refresh_detail_page_populates_terms_table(self):
         """确认详情页术语表只渲染 CSV 中的术语行。"""
