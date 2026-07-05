@@ -283,7 +283,7 @@ class LaTeXTransTuiApp(App[None]):
       #zotero-search-button,
       #zotero-auto-match-button,
       #import-zotero-button {
-          width: auto;
+          width: 4;
       }
 
       #zotero-import-rule {
