@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+from rich.text import Text
 from textual.css.query import NoMatches
 from textual.widgets import (
     Button,
@@ -486,7 +487,7 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
                 "web_api_key_env": "ZOTERO_API_KEY",
             },
         }
-        async with app.run_test():
+        async with app.run_test() as pilot:
             with patch("src.tui.app.load_ui_config", return_value=config):
                 app.load_config_page()
 
@@ -810,6 +811,70 @@ class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual([str(column.label) for column in table.ordered_columns], ["选中", "标题", "所在库", "所在分类"])
 
+    async def test_zotero_results_table_uses_row_cursor_for_click_selection(self):
+        """确认 Zotero 结果表使用行级光标，让点击行触发行选中事件。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+
+        async with app.run_test():
+            table = app.query_one("#zotero-results", DataTable)
+
+            self.assertEqual(table.cursor_type, "row")
+
+    async def test_zotero_results_table_truncates_long_titles(self):
+        """确认 Zotero 结果表标题列固定宽度，并用省略渲染长标题。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+
+        async with app.run_test() as pilot:
+            app.populate_zotero_results(
+                [
+                    {
+                        "item_key": "ITEM1",
+                        "title": "A Very Long Zotero Paper Title " * 6,
+                        "library_id": "7",
+                        "library_type": "user",
+                        "library_name": "Ada",
+                        "collection_names": [],
+                    }
+                ]
+            )
+            table = app.query_one("#zotero-results", DataTable)
+            await pilot.pause()
+            title_column = table.ordered_columns[1]
+            library_column = table.ordered_columns[2]
+            collection_column = table.ordered_columns[3]
+            title_cell = table.get_cell_at((0, 1))
+
+            self.assertGreater(title_column.width, library_column.width)
+            self.assertGreater(title_column.width, collection_column.width)
+            self.assertIsInstance(title_cell, Text)
+            self.assertEqual(title_cell.overflow, "ellipsis")
+            self.assertTrue(title_cell.no_wrap)
+
+    async def test_zotero_results_columns_fit_visible_width_without_horizontal_scroll(self):
+        """确认 Zotero 结果列宽不会超过表格可视宽度。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+
+        async with app.run_test(size=(100, 30)) as pilot:
+            app.switch_page(PAGE_DETAIL)
+            app.query_one("#detail-tabs", TabbedContent).active = "zotero-tab"
+            app.populate_zotero_results(
+                [
+                    {
+                        "item_key": "ITEM1",
+                        "title": "A Very Long Zotero Paper Title " * 6,
+                        "library_id": "7",
+                        "library_type": "user",
+                        "library_name": "Ada",
+                        "collection_names": ["LLM Steering", "Long Collection"],
+                    }
+                ]
+            )
+            table = app.query_one("#zotero-results", DataTable)
+            await pilot.pause()
+            render_width = sum(column.get_render_width(table) for column in table.ordered_columns)
+
+            self.assertLessEqual(render_width, table.size.width)
+
     async def test_load_zotero_libraries_populates_search_scope_select(self):
         """确认 Zotero 库 select 来自 adapter 的本地 API 库列表。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
@@ -875,7 +940,7 @@ class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
             table = app.query_one("#zotero-results", DataTable)
             self.assertEqual(table.row_count, 1)
             self.assertEqual(table.get_cell_at((0, 0)), "[]")
-            self.assertEqual(table.get_cell_at((0, 1)), "Paper")
+            self.assertEqual(table.get_cell_at((0, 1)).plain, "Paper")
 
     async def test_search_input_enter_triggers_search(self):
         """确认搜索框回车触发搜索。"""
@@ -916,7 +981,7 @@ class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
             app.auto_match_zotero_items()
 
             adapter.match_items_by_archive_id.assert_called_once_with("2508.18791", "7", "user")
-            self.assertEqual(app.query_one("#zotero-results", DataTable).get_cell_at((0, 1)), "Matched")
+            self.assertEqual(app.query_one("#zotero-results", DataTable).get_cell_at((0, 1)).plain, "Matched")
 
     async def test_toggle_zotero_row_selection_switches_marker(self):
         """确认点击结果行会在 [] 和 [√] 间切换。"""
@@ -940,6 +1005,34 @@ class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#zotero-results", DataTable).get_cell_at((0, 0)), "[√]")
             app.toggle_zotero_row_selection(0)
             self.assertEqual(app.query_one("#zotero-results", DataTable).get_cell_at((0, 0)), "[]")
+
+    async def test_clicking_zotero_result_row_toggles_marker(self):
+        """确认真实点击 Zotero 结果行会切换选中标记。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+
+        async with app.run_test() as pilot:
+            app.switch_page(PAGE_DETAIL)
+            app.query_one("#detail-tabs", TabbedContent).active = "zotero-tab"
+            app.populate_zotero_results(
+                [
+                    {
+                        "item_key": "ITEM1",
+                        "title": "Paper",
+                        "library_id": "7",
+                        "library_type": "user",
+                        "library_name": "Ada",
+                        "collection_names": [],
+                    }
+                ]
+            )
+            table = app.query_one("#zotero-results", DataTable)
+            await pilot.pause()
+
+            clicked = await pilot.click(table, offset=(10, 1))
+            await pilot.pause()
+
+            self.assertTrue(clicked)
+            self.assertEqual(table.get_cell_at((0, 0)), "[√]")
 
     async def test_select_project_clears_zotero_rows_and_selection(self):
         """确认切换项目时清空旧项目的 Zotero 搜索结果和勾选状态。"""

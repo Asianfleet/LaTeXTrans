@@ -9,9 +9,11 @@ from datetime import datetime
 from pathlib import Path
 
 import toml
+from rich.text import Text
 from rich.syntax import Syntax
-from textual import work
+from textual import events, work
 from textual.app import App, ComposeResult
+from textual.coordinate import Coordinate
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Button,
@@ -55,6 +57,73 @@ PAGE_PROGRESS = "progress"
 PAGE_DETAIL = "detail"
 PAGE_TASKS = "tasks"
 PAGE_CONFIG = "config"
+ZOTERO_SELECTION_COLUMN_WIDTH = 4
+ZOTERO_MIN_TITLE_COLUMN_WIDTH = 20
+ZOTERO_MIN_LIBRARY_COLUMN_WIDTH = 10
+ZOTERO_MAX_LIBRARY_COLUMN_WIDTH = 18
+ZOTERO_MIN_COLLECTION_COLUMN_WIDTH = 12
+ZOTERO_MAX_COLLECTION_COLUMN_WIDTH = 24
+
+
+class ZoteroResultsTable(DataTable):
+    """Zotero 搜索结果表，单击数据行即可切换选中状态。"""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """初始化 Zotero 表格的鼠标点击防抖状态。"""
+        super().__init__(*args, **kwargs)
+        self._ignore_next_click = False
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        """在鼠标按下时立即切换数据行，保证单击即可选中。"""
+        if self._toggle_clicked_row(event):
+            self._ignore_next_click = True
+            event.stop()
+
+    def on_resize(self, event: events.Resize) -> None:
+        """表格尺寸变化时重新收紧列宽，避免出现水平滚动。"""
+        if self.columns:
+            app = self.app
+            if hasattr(app, "_fit_zotero_results_table_columns"):
+                app._fit_zotero_results_table_columns()
+
+    def on_click(self, event: events.Click) -> None:
+        """把数据行单击解释为 Zotero 条目选择，并保留非数据区默认行为。"""
+        if self._ignore_next_click:
+            self._ignore_next_click = False
+            event.stop()
+            return
+        if self._toggle_clicked_row(event):
+            event.stop()
+
+    async def _on_click(self, event: events.Click) -> None:
+        """在默认 DataTable 处理前拦截 Zotero 数据行点击。"""
+        if self._toggle_clicked_row(event):
+            event.stop()
+            return
+        await super()._on_click(event)
+
+    def _toggle_clicked_row(self, event: events.MouseEvent) -> bool:
+        """根据点击事件切换对应 Zotero 数据行，返回是否已处理。"""
+        meta = event.style.meta
+        has_cell_meta = "row" in meta and "column" in meta
+        row_index = int(meta["row"]) if has_cell_meta else self._row_index_from_click(event)
+        column_index = int(meta["column"]) if has_cell_meta else 0
+        if not meta.get("out_of_bounds", False):
+            if 0 <= row_index < self.row_count and column_index >= 0:
+                self.cursor_coordinate = Coordinate(row_index, column_index)
+                app = self.app
+                if hasattr(app, "toggle_zotero_row_selection"):
+                    app.toggle_zotero_row_selection(row_index)
+                self._scroll_cursor_into_view(animate=True)
+                return True
+        return False
+
+    def _row_index_from_click(self, event: events.MouseEvent) -> int:
+        """从 Textual 鼠标事件坐标推导数据行索引。"""
+        row_index = int(event.y) - self.header_height
+        if 0 <= row_index < self.row_count or event.screen_y is None:
+            return row_index
+        return int(event.screen_y - self.region.y) - self.header_height
 
 
 class LaTeXTransTuiApp(App[None]):
@@ -289,7 +358,7 @@ class LaTeXTransTuiApp(App[None]):
                                 yield Button("自动匹配", id="zotero-auto-match-button")
                                 yield Rule(orientation="vertical", id="zotero-import-rule")
                                 yield Button("导入", id="import-zotero-button")
-                            yield DataTable(id="zotero-results")
+                            yield ZoteroResultsTable(id="zotero-results", cursor_type="row")
                 with Vertical(id=PAGE_TASKS):
                     yield DataTable(id="task-table")
                 with Vertical(id=PAGE_CONFIG):
@@ -786,8 +855,59 @@ class LaTeXTransTuiApp(App[None]):
     def _initialize_zotero_results_table(self) -> None:
         """初始化 Zotero 结果表的固定列。"""
         table = self.query_one("#zotero-results", DataTable)
+        table.cursor_type = "row"
         table.clear(columns=True)
-        table.add_columns("选中", "标题", "所在库", "所在分类")
+        selection_width, title_width, library_width, collection_width = self._zotero_column_widths(table)
+        table.add_column("选中", width=selection_width)
+        table.add_column("标题", width=title_width)
+        table.add_column("所在库", width=library_width)
+        table.add_column("所在分类", width=collection_width)
+
+    def _zotero_column_widths(self, table: DataTable) -> tuple[int, int, int, int]:
+        """按表格可视宽度分配 Zotero 结果列宽，避免触发水平滚动。"""
+        visible_width = table.size.width or 100
+        padding_budget = 2 * table.cell_padding * 4
+        content_budget = max(
+            visible_width - padding_budget,
+            ZOTERO_SELECTION_COLUMN_WIDTH + ZOTERO_MIN_TITLE_COLUMN_WIDTH,
+        )
+        remaining = max(content_budget - ZOTERO_SELECTION_COLUMN_WIDTH, ZOTERO_MIN_TITLE_COLUMN_WIDTH)
+        library_width = min(
+            ZOTERO_MAX_LIBRARY_COLUMN_WIDTH,
+            max(ZOTERO_MIN_LIBRARY_COLUMN_WIDTH, remaining // 5),
+        )
+        collection_width = min(
+            ZOTERO_MAX_COLLECTION_COLUMN_WIDTH,
+            max(ZOTERO_MIN_COLLECTION_COLUMN_WIDTH, remaining // 4),
+        )
+        title_width = remaining - library_width - collection_width
+
+        if title_width < ZOTERO_MIN_TITLE_COLUMN_WIDTH:
+            shortage = ZOTERO_MIN_TITLE_COLUMN_WIDTH - title_width
+            collection_reduction = min(shortage, max(collection_width - ZOTERO_MIN_COLLECTION_COLUMN_WIDTH, 0))
+            collection_width -= collection_reduction
+            shortage -= collection_reduction
+            library_reduction = min(shortage, max(library_width - ZOTERO_MIN_LIBRARY_COLUMN_WIDTH, 0))
+            library_width -= library_reduction
+            title_width = remaining - library_width - collection_width
+
+        return (
+            ZOTERO_SELECTION_COLUMN_WIDTH,
+            max(title_width, ZOTERO_MIN_TITLE_COLUMN_WIDTH),
+            library_width,
+            collection_width,
+        )
+
+    def _fit_zotero_results_table_columns(self) -> None:
+        """在布局稳定后重新收紧 Zotero 结果列宽。"""
+        table = self.query_one("#zotero-results", DataTable)
+        widths = self._zotero_column_widths(table)
+        for column, width in zip(table.ordered_columns, widths):
+            column.width = width
+            column.auto_width = False
+        table._require_update_dimensions = True
+        table._line_cache.clear()
+        table.refresh(layout=True)
 
     def _refresh_zotero_controls(self) -> None:
         """按当前任务类型刷新 Zotero 导入控件可见性。"""
@@ -874,10 +994,11 @@ class LaTeXTransTuiApp(App[None]):
         for item in self.zotero_results:
             table.add_row(
                 "[]",
-                str(item.get("title") or ""),
+                Text(str(item.get("title") or ""), overflow="ellipsis", no_wrap=True),
                 str(item.get("library_name") or item.get("library_id") or ""),
                 ", ".join(str(value) for value in item.get("collection_names", []) or []),
             )
+        table.call_after_refresh(self._fit_zotero_results_table_columns)
 
     def clear_zotero_results(self) -> None:
         """清空当前项目的 Zotero 搜索结果和选择状态。"""
