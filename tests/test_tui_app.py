@@ -1000,8 +1000,8 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
 class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
     """验证 Zotero tab 能对选中项目的 PDF 调用 adapter 并反馈状态。"""
 
-    async def test_refresh_detail_page_hides_import_controls_for_non_arxiv_task(self):
-        """确认非 arXiv 任务不显示竖向 Rule 和导入按钮。"""
+    async def test_refresh_detail_page_hides_import_controls_without_pdf(self):
+        """确认没有 PDF 的项目不显示竖向 Rule 和导入按钮。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
 
         async with app.run_test():
@@ -1013,6 +1013,26 @@ class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertFalse(app.query_one("#zotero-import-rule", Rule).display)
             self.assertFalse(app.query_one("#import-zotero-button", Button).display)
+
+    async def test_refresh_detail_page_shows_import_controls_for_any_project_with_pdf(self):
+        """确认只要选中项目包含 PDF，就显示 Zotero 导入控件。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+
+        async with app.run_test():
+            app.current_task = TaskViewState(input_type="history", inputs=["paper"])
+            app.current_task.projects.append(
+                ProjectViewState(
+                    project_name="paper",
+                    status=ProjectStatus.COMPLETED,
+                    pdf_path="D:/outputs/ch_paper/ch_paper.pdf",
+                )
+            )
+            app.selected_project_name = "paper"
+
+            app.refresh_detail_page()
+
+            self.assertTrue(app.query_one("#zotero-import-rule", Rule).display)
+            self.assertTrue(app.query_one("#import-zotero-button", Button).display)
 
     async def test_zotero_results_table_uses_fixed_columns(self):
         """确认 Zotero 结果表固定展示四列。"""

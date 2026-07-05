@@ -1153,10 +1153,11 @@ class LaTeXTransTuiApp(App[None]):
         table.refresh(layout=True)
 
     def _refresh_zotero_controls(self) -> None:
-        """按当前任务类型刷新 Zotero 导入控件可见性。"""
-        is_arxiv_task = self._selected_task_input_type() == "arxiv"
-        self.query_one("#zotero-import-rule", Rule).display = is_arxiv_task
-        self.query_one("#import-zotero-button", Button).display = is_arxiv_task
+        """按当前项目是否已有 PDF 刷新 Zotero 导入控件可见性。"""
+        project = self._selected_project()
+        has_pdf = bool(project and project.pdf_path)
+        self.query_one("#zotero-import-rule", Rule).display = has_pdf
+        self.query_one("#import-zotero-button", Button).display = has_pdf
 
     def load_zotero_libraries(self) -> None:
         """从本地 Zotero API 加载可选库到搜索范围下拉框。"""
