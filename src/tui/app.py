@@ -70,6 +70,41 @@ ERROR_TYPE_COLUMN_WIDTH = 5
 ERROR_PROBLEM_COLUMN_WIDTH = 24
 ERROR_STATUS_COLUMN_WIDTH = 8
 ERROR_MIN_CONTENT_COLUMN_WIDTH = 6
+PROGRESS_LOG_LINE_RE = re.compile(r"^\[[#-]+\]\s+\d{1,3}(?:\.\d+)?%")
+
+
+def compact_progress_log_for_display(log_text: str) -> str:
+    """压缩连续进度日志块，展示时只保留首行、中间行和末行。"""
+    displayed_lines: list[str] = []
+    progress_block: list[str] = []
+
+    def flush_progress_block() -> None:
+        """将当前连续进度块按展示规则写入输出行。"""
+        if not progress_block:
+            return
+        if len(progress_block) <= 3:
+            displayed_lines.extend(progress_block)
+        else:
+            middle_index = len(progress_block) // 2
+            displayed_lines.extend(
+                [
+                    progress_block[0],
+                    progress_block[middle_index],
+                    progress_block[-1],
+                ]
+            )
+        progress_block.clear()
+
+    for line in log_text.splitlines():
+        stripped_line = line.rstrip()
+        if PROGRESS_LOG_LINE_RE.match(stripped_line):
+            progress_block.append(stripped_line)
+            continue
+        flush_progress_block()
+        displayed_lines.append(stripped_line)
+
+    flush_progress_block()
+    return "\n".join(displayed_lines)
 
 
 class ErrorReportsTable(DataTable):
@@ -190,6 +225,11 @@ class LaTeXTransTuiApp(App[None]):
 
     #tex-preview {
         width: 100%;
+    }
+
+    #log-tab,
+    #project-log {
+        height: 1fr;
     }
 
     #entry {
@@ -366,7 +406,6 @@ class LaTeXTransTuiApp(App[None]):
                         with TabPane("错误记录", id="errors-tab"):
                             yield ErrorReportsTable(id="errors-table")
                         with TabPane("日志", id="log-tab"):
-                            yield Static("", id="project-log-summary")
                             yield RichLog(id="project-log")
                         with TabPane("Zotero", id="zotero-tab"):
                             with Horizontal(id="zotero-controls"):
@@ -830,17 +869,15 @@ class LaTeXTransTuiApp(App[None]):
     def _refresh_project_log(self, project: ProjectViewState) -> None:
         """Load the selected project's log file into the log panel."""
         log_widget = self.query_one("#project-log", RichLog)
-        log_summary = self.query_one("#project-log-summary", Static)
         log_widget.clear()
         if project.log_path is None:
-            log_summary.update("")
             return
 
         try:
             log_text = Path(project.log_path).read_text(encoding="utf-8")
+            log_text = compact_progress_log_for_display(log_text)
         except OSError as exc:
             log_text = f"无法读取日志文件：{exc}"
-        log_summary.update(log_text)
         log_widget.write(log_text)
 
     def _refresh_errors_table(self, project: ProjectViewState) -> None:

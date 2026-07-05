@@ -31,6 +31,7 @@ from src.tui.app import (
     PAGE_PROGRESS,
     PAGE_TASKS,
     LaTeXTransTuiApp,
+    compact_progress_log_for_display,
 )
 from src.tui.history import TUI_PROJECT_METADATA_FILENAME
 from src.tui.state import ProjectStatus, ProjectViewState, TaskViewState
@@ -745,7 +746,9 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
                     app.query_one("#detail-paths", Static)
                 tex_preview = app.query_one("#tex-preview", Static)
                 self.assertIn("\\section{Result}", tex_preview.content.code)
-                self.assertIn("compile ok", str(app.query_one("#project-log-summary", Static).content))
+                with self.assertRaises(NoMatches):
+                    app.query_one("#project-log-summary", Static)
+                self.assertIsNotNone(app.query_one("#project-log", RichLog))
                 errors_table = app.query_one("#errors-table", DataTable)
                 self.assertEqual(errors_table.row_count, 1)
                 self.assertEqual(
@@ -756,6 +759,39 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(errors_table.get_cell_at((0, 1)), "项目")
                 self.assertEqual(errors_table.get_cell_at((0, 2)).plain, "compile failed")
                 self.assertEqual(errors_table.get_cell_at((0, 3)).plain, "未解决")
+
+    def test_compact_progress_log_for_display_keeps_first_middle_and_last_progress(self):
+        """确认日志展示压缩连续进度块，只保留首行、中间行和末行。"""
+        log_text = "\n".join(
+            [
+                "before",
+                "[##----------------------]  10.0% step 1",
+                "[####--------------------]  20.0% step 2",
+                "[######------------------]  30.0% step 3",
+                "[########----------------]  40.0% step 4",
+                "[##########--------------]  50.0% step 5",
+                "after",
+                "[##----------------------]  10.0% second 1",
+                "[####--------------------]  20.0% second 2",
+                "[######------------------]  30.0% second 3",
+            ]
+        )
+
+        compacted = compact_progress_log_for_display(log_text)
+
+        self.assertEqual(
+            compacted.splitlines(),
+            [
+                "before",
+                "[##----------------------]  10.0% step 1",
+                "[######------------------]  30.0% step 3",
+                "[##########--------------]  50.0% step 5",
+                "after",
+                "[##----------------------]  10.0% second 1",
+                "[####--------------------]  20.0% second 2",
+                "[######------------------]  30.0% second 3",
+            ],
+        )
 
     async def test_refresh_detail_page_populates_error_report_content_status_and_truncates_text(self):
         """确认错误记录 tab 展示内容、状态颜色，并截断原文和译文。"""
