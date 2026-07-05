@@ -27,6 +27,20 @@ class ValidatorAgentTests(unittest.TestCase):
 
         self.assertIsNone(self.validator._validate_closed_brackets(part))
 
+    def test_validate_brackets_ignores_inline_macro_label_parentheses(self):
+        part = {
+            "content": (
+                r"This helps to \emph{a)} detect representations, "
+                r"\emph{b)} identify robust internals."
+            ),
+            "trans_content": (
+                r"这有助于：\emph{a)} 检测表征；"
+                r"\emph{b)} 识别稳健的内部表示。"
+            ),
+        }
+
+        self.assertIsNone(self.validator._validate_closed_brackets(part))
+
     def test_validate_command_mismatch_uses_strict_default_policy(self):
         part = {
             "section": "5_3",

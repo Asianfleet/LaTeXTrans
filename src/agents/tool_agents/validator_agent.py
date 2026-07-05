@@ -182,6 +182,7 @@ class ValidatorAgent(BaseToolAgent):
             bracket_pairs = {'[': ']', '{': '}'}    
         else:
             content = self._mask_item_optional_labels(content)
+            content = self._mask_inline_formatting_command_arguments(content)
             bracket_pairs = {'(': ')', '（': '）', '[': ']', '{': '}'}
         opening_brackets = set(bracket_pairs.keys())
         closing_brackets = set(bracket_pairs.values())
@@ -230,6 +231,46 @@ class ValidatorAgent(BaseToolAgent):
                     depth -= 1
                     if depth == 0:
                         for mask_pos in range(idx, pos + 1):
+                            chars[mask_pos] = " "
+                        break
+                pos += 1
+
+        return "".join(chars)
+
+    def _mask_inline_formatting_command_arguments(self, content: str) -> str:
+        """屏蔽内联格式宏参数内部文本，避免枚举标签括号干扰结构校验。"""
+        chars = list(content)
+        inline_formatting_commands = {
+            "emph",
+            "textbf",
+            "textit",
+            "textsc",
+            "texttt",
+            "underline",
+        }
+        command_pattern = re.compile(r"\\([a-zA-Z]+)\*?")
+        for match in command_pattern.finditer(content):
+            if match.group(1) not in inline_formatting_commands:
+                continue
+
+            idx = match.end()
+            while idx < len(content) and content[idx].isspace():
+                idx += 1
+            if idx >= len(content) or content[idx] != "{":
+                continue
+
+            depth = 0
+            pos = idx
+            while pos < len(content):
+                if content[pos] == "\\":
+                    pos += 2
+                    continue
+                if content[pos] == "{":
+                    depth += 1
+                elif content[pos] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        for mask_pos in range(idx + 1, pos):
                             chars[mask_pos] = " "
                         break
                 pos += 1
