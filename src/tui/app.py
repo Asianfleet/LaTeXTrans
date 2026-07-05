@@ -354,10 +354,10 @@ class LaTeXTransTuiApp(App[None]):
                             with Horizontal(id="zotero-controls"):
                                 yield Select([], id="zotero-library-select")
                                 yield Input(id="zotero-search-input")
-                                yield Button("搜索", id="zotero-search-button")
-                                yield Button("自动匹配", id="zotero-auto-match-button")
+                                yield Button("搜索", id="zotero-search-button", flat=True)
+                                yield Button("自动匹配", id="zotero-auto-match-button", flat=True)
                                 yield Rule(orientation="vertical", id="zotero-import-rule")
-                                yield Button("导入", id="import-zotero-button")
+                                yield Button("导入", id="import-zotero-button", flat=True)
                             yield ZoteroResultsTable(id="zotero-results", cursor_type="row")
                 with Vertical(id=PAGE_TASKS):
                     yield DataTable(id="task-table")
