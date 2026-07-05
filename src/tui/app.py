@@ -694,12 +694,17 @@ class LaTeXTransTuiApp(App[None]):
         if target_task is None or target_task is not self.current_task:
             return
 
-        target_task.apply_event(dict(event))
+        event_payload = dict(event)
+        target_task.apply_event(event_payload)
+        if event_payload.get("type") == "project_log":
+            self._refresh_selected_project_log(event_payload)
+            return
+
         self._replace_history_project(target_task)
-        self._persist_project_event(dict(event), target_task)
+        self._persist_project_event(event_payload, target_task)
         self._refresh_progress_widgets(target_task)
-        self.query_one("#event-log", RichLog).write(str(event))
-        self._refresh_selected_project_log(dict(event))
+        self.query_one("#event-log", RichLog).write(str(event_payload))
+        self._refresh_selected_project_log(event_payload)
         self.refresh_project_list()
         self.refresh_task_table()
 
