@@ -72,6 +72,22 @@ class TuiStateTests(unittest.TestCase):
         self.assertEqual(state.projects[0].status, ProjectStatus.FAILED)
         self.assertEqual(state.projects[0].error, "boom")
 
+    def test_project_log_event_appends_project_log_lines(self):
+        """project_log 事件应追加到对应项目的内存日志。"""
+        state = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
+
+        state.apply_event(
+            {
+                "type": "project_log",
+                "project_name": "2508.18791",
+                "line": "[ParserAgent] [INFO] parsed",
+            }
+        )
+
+        self.assertEqual(state.projects[0].log_lines, ["[ParserAgent] [INFO] parsed"])
+        self.assertEqual(state.completed, 0)
+        self.assertEqual(state.failed, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

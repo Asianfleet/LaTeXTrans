@@ -33,6 +33,7 @@ class ProjectViewState:
     validation_summary: dict[str, Any] | None = None
     error: str | None = None
     zotero_status: str = "not_imported"
+    log_lines: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -61,6 +62,14 @@ class TaskViewState:
             project = self._get_or_create_project(str(event.get("project_name") or "project"))
             project.status = ProjectStatus.RUNNING
             self.running_project = project.project_name
+            self._copy_project_fields(project, event)
+            return
+
+        if event_type == "project_log":
+            project = self._get_or_create_project(str(event.get("project_name") or "project"))
+            line = str(event.get("line") or event.get("message") or "")
+            if line:
+                project.log_lines.append(line)
             self._copy_project_fields(project, event)
             return
 

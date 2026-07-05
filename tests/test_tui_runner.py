@@ -82,6 +82,34 @@ class TuiRunnerTests(unittest.TestCase):
             self.assertTrue((config_dir / "ui.toml").is_file())
             self.assertEqual(load_config.call_args.kwargs["config_path"], str(config_dir / "ui.toml"))
 
+    def test_run_tui_task_forwards_project_log_events(self):
+        """TUI runner should forward runtime project_log events to the UI callback."""
+        config = {"target_language": "ch", "paper_list": []}
+        events = []
+
+        def fake_run_projects(**kwargs):
+            """Emit a project_log event through the provided callback."""
+            kwargs["event_callback"](
+                {
+                    "type": "project_log",
+                    "project_name": "paper",
+                    "line": "[FakeAgent] [INFO] hello",
+                }
+            )
+            return {"completed_projects": [], "failed_projects": []}
+
+        with patch("src.tui.runner.ensure_ui_config", return_value=Path("config/ui.toml")):
+            with patch("src.tui.runner.runtime.load_runtime_config", return_value=config):
+                with patch(
+                    "src.tui.runner.runtime.prepare_projects",
+                    return_value=([r"D:\paper"], config, "src", "out"),
+                ):
+                    with patch("src.tui.runner.runtime.run_projects", side_effect=fake_run_projects):
+                        run_tui_task("config/ui.toml", "local", [r"D:\paper"], {}, events.append)
+
+        self.assertEqual(events[0]["type"], "project_log")
+        self.assertEqual(events[0]["line"], "[FakeAgent] [INFO] hello")
+
     def test_run_tui_task_emits_errors_for_prepare_skipped_inputs(self):
         """Prepare skips should emit visible project_error events while valid projects continue."""
         config = {"target_language": "ch", "paper_list": []}

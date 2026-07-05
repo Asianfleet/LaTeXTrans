@@ -699,8 +699,17 @@ class LaTeXTransTuiApp(App[None]):
         self._persist_project_event(dict(event), target_task)
         self._refresh_progress_widgets(target_task)
         self.query_one("#event-log", RichLog).write(str(event))
+        self._refresh_selected_project_log(dict(event))
         self.refresh_project_list()
         self.refresh_task_table()
+
+    def _refresh_selected_project_log(self, event: dict[str, object]) -> None:
+        """如果日志事件属于当前详情项目，立即刷新日志控件。"""
+        if event.get("type") != "project_log":
+            return
+        project = self._selected_project()
+        if project is not None and project.project_name == str(event.get("project_name") or ""):
+            self._refresh_project_log(project)
 
     def _refresh_progress_widgets(self, task: TaskViewState) -> None:
         """根据任务状态刷新摘要和进度条。"""
@@ -871,13 +880,15 @@ class LaTeXTransTuiApp(App[None]):
         log_widget = self.query_one("#project-log", RichLog)
         log_widget.clear()
         if project.log_path is None:
+            for line in project.log_lines:
+                log_widget.write(line)
             return
 
         try:
             log_text = Path(project.log_path).read_text(encoding="utf-8")
             log_text = compact_progress_log_for_display(log_text)
         except OSError as exc:
-            log_text = f"无法读取日志文件：{exc}"
+            log_text = "\n".join(project.log_lines) if project.log_lines else f"无法读取日志文件：{exc}"
         log_widget.write(log_text)
 
     def _refresh_errors_table(self, project: ProjectViewState) -> None:

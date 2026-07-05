@@ -562,6 +562,27 @@ class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(progress_bar.progress, 1)
             self.assertIsNotNone(app.query_one("#event-log", RichLog))
 
+    async def test_project_log_event_updates_selected_detail_log(self):
+        """确认项目日志事件会实时写入当前详情页日志控件。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
+            app.tasks = [app.current_task]
+            app.handle_runtime_event({"type": "project_start", "project_name": "2508.18791"})
+            app.select_project("2508.18791")
+
+            app.handle_runtime_event(
+                {
+                    "type": "project_log",
+                    "project_name": "2508.18791",
+                    "line": "[ParserAgent] [INFO] parsed",
+                }
+            )
+            await pilot.pause()
+
+            project = app.current_task.projects[0]
+            self.assertEqual(project.log_lines, ["[ParserAgent] [INFO] parsed"])
+
     async def test_start_current_task_initializes_total_without_run_start(self):
         """确认真实启动路径不依赖 runner 发送 run_start 也会初始化总数。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)

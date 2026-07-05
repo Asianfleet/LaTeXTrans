@@ -410,6 +410,37 @@ class LatexCompilerLanguageTests(unittest.TestCase):
 
         self.assertEqual(checked_dirs, [True])
 
+    def test_compile_routes_status_messages_to_log_callback(self):
+        """编译状态消息应进入显式项目日志回调。"""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            project_dir = Path(tmp_dir)
+            (project_dir / "main.tex").write_text(
+                "\\documentclass{article}\n\\begin{document}\n本文\n\\end{document}\n",
+                encoding="utf-8",
+            )
+            events = []
+
+            def fake_compile(tex_file, out_dir, engine):
+                out_path = Path(out_dir)
+                out_path.mkdir(parents=True, exist_ok=True)
+
+            compiler = LaTexCompiler(
+                str(project_dir),
+                target_language="ch",
+                log_callback=events.append,
+                emit_console=False,
+            )
+
+            with patch.object(compiler, "_compile_with_pdflatex", side_effect=fake_compile), \
+                    patch.object(compiler, "_compile_with_xelatex", side_effect=fake_compile), \
+                    patch("builtins.print") as print_mock:
+                compiler.compile()
+
+        lines = [event["line"] for event in events]
+        self.assertIn("Start compiling with pdflatex...⏳", lines)
+        self.assertIn("⚠️  Failed to generate PDF with all configured engines. Please check the log.", lines)
+        print_mock.assert_not_called()
+
 class GeneratorAgentLanguagePropagationTests(unittest.TestCase):
     def test_generator_passes_target_language_to_constructor_and_compiler(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -443,7 +474,7 @@ class GeneratorAgentLanguagePropagationTests(unittest.TestCase):
                     return None
 
             class FakeCompiler:
-                def __init__(self, output_latex_dir, target_language):
+                def __init__(self, output_latex_dir, target_language, **kwargs):
                     compiler_languages.append(target_language)
 
                 def compile(self):
