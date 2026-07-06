@@ -13,7 +13,6 @@ from textual.widgets import (
     Footer,
     Input,
     ListView,
-    ProgressBar,
     RichLog,
     Rule,
     Select,
@@ -28,7 +27,6 @@ from src.tui.app import (
     PAGE_CONFIG,
     PAGE_DETAIL,
     PAGE_ENTRY,
-    PAGE_PROGRESS,
     PAGE_TASKS,
     LaTeXTransTuiApp,
     compact_progress_log_for_display,
@@ -119,12 +117,23 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
         """确认 switch_page 会更新主内容切换器当前页面。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         async with app.run_test():
-            for page_id in [PAGE_ENTRY, PAGE_PROGRESS, PAGE_DETAIL, PAGE_TASKS, PAGE_CONFIG]:
+            for page_id in [PAGE_ENTRY, PAGE_DETAIL, PAGE_TASKS, PAGE_CONFIG]:
                 app.switch_page(page_id)
                 self.assertEqual(
                     app.query_one("#main-switcher", ContentSwitcher).current,
                     page_id,
                 )
+
+    async def test_progress_widgets_are_not_composed(self):
+        """确认进度页组件已从主布局移除。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            with self.assertRaises(NoMatches):
+                app.query_one("#progress-summary")
+            with self.assertRaises(NoMatches):
+                app.query_one("#task-progress")
+            with self.assertRaises(NoMatches):
+                app.query_one("#event-log")
 
 
 class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
@@ -147,34 +156,52 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(action_children, ["input-type-select", "start-task-button"])
             self.assertEqual(str(app.query_one("#start-task-button", Button).label), "发送")
 
-    async def test_submit_entry_form_creates_task_and_switches_to_progress(self):
-        """确认有效入口表单会创建任务状态并切换到进度页。"""
+    async def test_submit_entry_form_creates_task_stays_on_entry_and_notifies(self):
+        """确认有效入口表单会创建任务、留在入口页并发出开始通知。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         async with app.run_test():
             app.query_one("#input-type-select", Select).value = "arxiv"
             app.query_one("#batch-input", TextArea).text = "2508.18791\n2407.01648"
 
             with patch.object(app, "start_current_task") as start_current_task:
-                app.submit_entry_form()
+                with patch.object(app, "notify") as notify:
+                    app.submit_entry_form()
 
             self.assertIsInstance(app.current_task, TaskViewState)
             self.assertEqual(app.current_task.inputs, ["2508.18791", "2407.01648"])
-            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_PROGRESS)
+            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_ENTRY)
+            self.assertIn(app.current_task.task_id, notify.call_args.args[0])
             start_current_task.assert_called_once_with()
 
-    async def test_start_button_submits_entry_form(self):
-        """确认开始按钮会提交入口表单并进入进度页。"""
+    async def test_start_button_submits_entry_form_without_leaving_entry_page(self):
+        """确认开始按钮提交入口表单后仍留在入口页。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         async with app.run_test() as pilot:
             app.query_one("#input-type-select", Select).value = "arxiv"
             app.query_one("#batch-input", TextArea).text = "2508.18791"
 
             with patch.object(app, "start_current_task") as start_current_task:
-                await pilot.click("#start-task-button")
+                with patch.object(app, "notify"):
+                    await pilot.click("#start-task-button")
+                    await pilot.pause()
 
             self.assertIsInstance(app.current_task, TaskViewState)
-            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_PROGRESS)
+            self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_ENTRY)
             start_current_task.assert_called_once_with()
+
+    async def test_submit_entry_form_notifies_with_timestamp_task_id(self):
+        """确认任务开始通知包含新建任务 id。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            app.query_one("#input-type-select", Select).value = "arxiv"
+            app.query_one("#batch-input", TextArea).text = "2508.18791"
+
+            with patch.object(app, "start_current_task"), patch.object(app, "notify") as notify:
+                app.submit_entry_form()
+
+            self.assertIsInstance(app.current_task, TaskViewState)
+            self.assertIn("任务已开始", notify.call_args.args[0])
+            self.assertIn(app.current_task.task_id, notify.call_args.args[0])
 
     async def test_submit_entry_form_shows_validation_errors(self):
         """确认无效入口表单会在入口页展示校验错误。"""
@@ -255,6 +282,30 @@ class TuiTaskProjectSemanticsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(table.row_count, 2)
             self.assertEqual(table.get_cell_at((0, 2)), task.task_id)
             self.assertEqual(table.get_cell_at((1, 2)), task.task_id)
+
+    async def test_sidebar_marks_projects_from_running_task_orange(self):
+        """确认左侧项目属于进行中任务时用橙色文字展示。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+
+        async with app.run_test() as pilot:
+            running_task = TaskViewState(input_type="arxiv", inputs=["done", "running"], task_id="task-1", total=2)
+            running_task.completed = 1
+            running_task.projects.append(ProjectViewState(project_name="done", status=ProjectStatus.COMPLETED))
+            running_task.projects.append(ProjectViewState(project_name="running", status=ProjectStatus.RUNNING))
+            finished_task = TaskViewState(input_type="arxiv", inputs=["finished"], task_id="task-2", total=1)
+            finished_task.completed = 1
+            finished_task.projects.append(ProjectViewState(project_name="finished", status=ProjectStatus.COMPLETED))
+            app.tasks = [running_task, finished_task]
+
+            app.refresh_project_list()
+            await pilot.pause()
+
+            list_view = app.query_one("#project-list", ListView)
+            running_labels = [list_view.children[index].query_one(Static) for index in (0, 1)]
+            finished_label = list_view.children[2].query_one(Static)
+            self.assertIn("running-task-project", running_labels[0].classes)
+            self.assertIn("running-task-project", running_labels[1].classes)
+            self.assertNotIn("running-task-project", finished_label.classes)
 
     async def test_sidebar_selection_uses_project_task_identity(self):
         """确认侧栏选择项目时按任务 id 和项目名定位详情。"""
@@ -452,13 +503,14 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
     async def test_config_field_change_persists_immediately_and_refreshes_preview(self):
         """确认配置字段变化后会即时保存 UI 配置并刷新 TOML 预览。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
-        async with app.run_test():
-            with patch("src.tui.app.load_ui_config", return_value={"target_language": "ja"}):
-                app.load_config_page()
-
-            app.query_one("#config-target_language", Select).value = "fr"
+        async with app.run_test() as pilot:
             with patch("src.tui.app.save_ui_config") as save_config:
+                with patch("src.tui.app.load_ui_config", return_value={"target_language": "ja"}):
+                    app.load_config_page()
+
+                app.query_one("#config-target_language", Select).value = "fr"
                 app.persist_config_form_change()
+                await pilot.pause()
 
             self.assertEqual(save_config.call_args.args[1]["target_language"], "fr")
             preview = app.query_one("#config-preview", TextArea).text
@@ -546,11 +598,11 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("非负整数", str(app.query_one("#config-error", Static).content))
 
 
-class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
-    """验证任务进度页会响应 runtime 事件。"""
+class TuiTaskEventTests(unittest.IsolatedAsyncioTestCase):
+    """验证任务 runtime 事件会刷新状态并触发通知。"""
 
     async def test_handle_runtime_event_updates_task_and_log(self):
-        """确认 runtime 事件会更新当前任务状态并写入日志控件。"""
+        """确认 runtime 事件会更新当前任务状态。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         async with app.run_test():
             app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
@@ -563,10 +615,83 @@ class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(app.current_task.completed, 1)
             self.assertGreaterEqual(len(app.current_task.events), 3)
-            progress_bar = app.query_one("#task-progress", ProgressBar)
-            self.assertEqual(progress_bar.total, 1)
-            self.assertEqual(progress_bar.progress, 1)
-            self.assertIsNotNone(app.query_one("#event-log", RichLog))
+
+    async def test_project_complete_notifies_project_and_task_completion_once(self):
+        """确认项目完成和整任务完成都会通知，整任务完成不会重复通知。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            app.current_task = TaskViewState(
+                input_type="arxiv",
+                inputs=["2508.18791"],
+                task_id="task-1",
+                total=1,
+            )
+            app.tasks = [app.current_task]
+
+            with patch.object(app, "notify") as notify:
+                app.handle_runtime_event(
+                    {"type": "project_complete", "project_name": "2508.18791"},
+                    app.current_task,
+                )
+                app.handle_runtime_event(
+                    {"type": "project_complete", "project_name": "2508.18791"},
+                    app.current_task,
+                )
+
+            messages = [call.args[0] for call in notify.call_args_list]
+            self.assertEqual(messages.count("任务全部完成：task-1"), 1)
+            self.assertTrue(any("项目完成：2508.18791" in message for message in messages))
+
+    async def test_duplicate_project_terminal_events_notify_project_once(self):
+        """确认同一项目重复终态事件不会重复弹项目级通知。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            app.current_task = TaskViewState(
+                input_type="arxiv",
+                inputs=["2508.18791"],
+                task_id="task-1",
+                total=1,
+            )
+            app.tasks = [app.current_task]
+
+            with patch.object(app, "notify") as notify:
+                app.handle_runtime_event(
+                    {"type": "project_error", "project_name": "2508.18791", "error": "first"},
+                    app.current_task,
+                )
+                app.handle_runtime_event(
+                    {"type": "project_error", "project_name": "2508.18791", "error": "second"},
+                    app.current_task,
+                )
+
+            messages = [call.args[0] for call in notify.call_args_list]
+            self.assertEqual(
+                len([message for message in messages if "发生异常：2508.18791" in message]),
+                1,
+            )
+
+    async def test_project_error_notifies_exception_and_task_completion(self):
+        """确认项目异常会发出异常通知，并在任务结束时通知全部完成。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            app.current_task = TaskViewState(
+                input_type="arxiv",
+                inputs=["2508.18791"],
+                task_id="task-1",
+                total=1,
+            )
+            app.tasks = [app.current_task]
+
+            with patch.object(app, "notify") as notify:
+                app.handle_runtime_event(
+                    {"type": "project_error", "project_name": "2508.18791", "error": "runner failed"},
+                    app.current_task,
+                )
+
+            messages = [call.args[0] for call in notify.call_args_list]
+            self.assertTrue(any("发生异常：2508.18791" in message for message in messages))
+            self.assertTrue(any("runner failed" in message for message in messages))
+            self.assertIn("任务全部完成：task-1", messages)
 
     async def test_project_log_event_updates_selected_detail_log(self):
         """确认项目日志事件会实时写入当前详情页日志控件。"""
@@ -635,10 +760,7 @@ class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call_kwargs["input_type"], "arxiv")
             self.assertEqual(call_kwargs["items"], ["2508.18791"])
             self.assertEqual(app.current_task.completed, 1)
-            progress_bar = app.query_one("#task-progress", ProgressBar)
             self.assertEqual(app.current_task.total, 1)
-            self.assertEqual(progress_bar.total, 1)
-            self.assertEqual(progress_bar.progress, 1)
 
     async def test_stale_worker_events_do_not_update_new_current_task(self):
         """确认旧任务 worker 回调不会污染新的 current_task。"""
@@ -670,15 +792,15 @@ class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
             app.current_task = TaskViewState(input_type="arxiv", inputs=["2508.18791"])
 
             with patch("src.tui.app.run_tui_task", side_effect=failing_runner):
-                app.start_current_task()
-                await app.workers.wait_for_complete()
-                await pilot.pause()
+                with patch.object(app, "notify") as notify:
+                    app.start_current_task()
+                    await app.workers.wait_for_complete()
+                    await pilot.pause()
 
             self.assertEqual(app.current_task.failed, 1)
             self.assertEqual(app.current_task.total, 1)
-            self.assertIn("runner failed", str(app.query_one("#progress-summary", Static).content))
-            self.assertEqual(app.query_one("#task-progress", ProgressBar).progress, 1)
             self.assertTrue(any("runner failed" in str(event) for event in app.current_task.events))
+            self.assertTrue(any("发生异常" in call.args[0] for call in notify.call_args_list))
 
     async def test_remote_prepare_failure_does_not_remap_error_to_input_url(self):
         """确认 remote prepare 全失败后不会再补发绑定到输入 URL 的 project_error。"""
@@ -708,6 +830,29 @@ class TuiProgressTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(
                 any(project.project_name in remote_inputs for project in app.current_task.projects)
             )
+
+    async def test_remote_prepare_failure_notifies_exception_and_task_completion(self):
+        """确认 remote prepare 全失败时不会静默结束。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        remote_inputs = ["https://example.test/first.zip"]
+
+        def failing_remote_runner(**kwargs):
+            """模拟 remote prepare 全失败时 runner 先发 run_start total=0 再抛错。"""
+            kwargs["event_callback"]({"type": "run_start", "total": 0})
+            raise RuntimeError("No valid TeX projects available for processing.")
+
+        async with app.run_test() as pilot:
+            app.current_task = TaskViewState(input_type="remote", inputs=remote_inputs, task_id="task-1")
+
+            with patch("src.tui.app.run_tui_task", side_effect=failing_remote_runner):
+                with patch.object(app, "notify") as notify:
+                    app.start_current_task()
+                    await app.workers.wait_for_complete()
+                    await pilot.pause()
+
+            messages = [call.args[0] for call in notify.call_args_list]
+            self.assertTrue(any("发生异常：task-1" in message for message in messages))
+            self.assertIn("任务全部完成：task-1", messages)
 
 
 class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):

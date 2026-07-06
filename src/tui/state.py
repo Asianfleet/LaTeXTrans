@@ -47,6 +47,8 @@ class TaskViewState:
     completed: int = 0
     failed: int = 0
     running_project: str | None = None
+    completion_notified: bool = False
+    notified_project_events: set[tuple[str, str]] = field(default_factory=set)
     events: list[dict[str, Any]] = field(default_factory=list)
     projects: list[ProjectViewState] = field(default_factory=list)
 

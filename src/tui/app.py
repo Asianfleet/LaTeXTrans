@@ -25,7 +25,6 @@ from textual.widgets import (
     Input,
     ListItem,
     ListView,
-    ProgressBar,
     RichLog,
     Rule,
     Select,
@@ -55,7 +54,6 @@ from src.tui.state import ProjectStatus, ProjectViewState, TaskViewState
 from src.tui.zotero_adapter import ZoteroAdapter
 
 PAGE_ENTRY = "entry"
-PAGE_PROGRESS = "progress"
 PAGE_DETAIL = "detail"
 PAGE_TASKS = "tasks"
 PAGE_CONFIG = "config"
@@ -207,6 +205,10 @@ class LaTeXTransTuiApp(App[None]):
 
     #project-list ListItem:hover {
         background: $surface;
+    }
+
+    .running-task-project {
+        color: orange;
     }
 
     #main-switcher {
@@ -392,10 +394,6 @@ class LaTeXTransTuiApp(App[None]):
                             )
                             yield Button("发送", id="start-task-button", flat=True)
                         yield Static("", id="entry-error")
-                with Vertical(id=PAGE_PROGRESS):
-                    yield Static("未开始", id="progress-summary")
-                    yield ProgressBar(id="task-progress")
-                    yield RichLog(id="event-log")
                 with Vertical(id=PAGE_DETAIL):
                     with TabbedContent(initial="tex-tab", id="detail-tabs"):
                         with TabPane("TeX", id="tex-tab"):
@@ -482,7 +480,10 @@ class LaTeXTransTuiApp(App[None]):
         list_view.clear()
 
         for task, project in self._iter_project_states():
-            list_view.append(ListItem(Static(project.project_name)))
+            label = Static(project.project_name)
+            if self._task_is_running(task):
+                label.add_class("running-task-project")
+            list_view.append(ListItem(label))
 
     def refresh_detail_page(self) -> None:
         """Refresh read-only detail widgets for the selected project."""
@@ -596,6 +597,8 @@ class LaTeXTransTuiApp(App[None]):
             return
         try:
             config = self._config_from_form()
+        except NoMatches:
+            return
         except ValueError as exc:
             self.query_one("#config-error", Static).update(str(exc))
             return
@@ -683,13 +686,15 @@ class LaTeXTransTuiApp(App[None]):
         error_widget.update("")
         self.current_task = TaskViewState(input_type=input_type, inputs=items, task_id=self._next_task_id())
         self.tasks.append(self.current_task)
-        self.query_one("#event-log", RichLog).clear()
-        self.query_one("#progress-summary", Static).update(f"已创建任务：{len(items)} 个条目")
-        self.switch_page(PAGE_PROGRESS)
+        self.switch_page(PAGE_ENTRY)
+        self.notify(
+            f"任务已开始：{self.current_task.task_id}（{len(items)} 个条目）",
+            title="LaTeXTransPlus",
+        )
         self.start_current_task()
 
     def handle_runtime_event(self, event: dict[str, object], task: TaskViewState | None = None) -> None:
-        """应用 runtime 事件并刷新进度页控件。"""
+        """应用 runtime 事件并刷新任务相关视图。"""
         target_task = task or self.current_task
         if target_task is None or target_task is not self.current_task:
             return
@@ -702,8 +707,7 @@ class LaTeXTransTuiApp(App[None]):
 
         self._replace_history_project(target_task)
         self._persist_project_event(event_payload, target_task)
-        self._refresh_progress_widgets(target_task)
-        self.query_one("#event-log", RichLog).write(str(event_payload))
+        self._notify_task_event(event_payload, target_task)
         self._refresh_selected_project_log(event_payload)
         self.refresh_project_list()
         self.refresh_task_table()
@@ -716,19 +720,44 @@ class LaTeXTransTuiApp(App[None]):
         if project is not None and project.project_name == str(event.get("project_name") or ""):
             self._refresh_project_log(project)
 
-    def _refresh_progress_widgets(self, task: TaskViewState) -> None:
-        """根据任务状态刷新摘要和进度条。"""
-        finished = task.completed + task.failed
-        summary = (
-            f"总数 {task.total}，"
-            f"完成 {task.completed}，"
-            f"失败 {task.failed}"
+    def _notify_task_event(self, event: dict[str, object], task: TaskViewState) -> None:
+        """根据任务事件发送轻量通知，不依赖已删除的进度页。"""
+        event_type = event.get("type")
+        project_name = str(event.get("project_name") or "project")
+        if event_type == "project_complete":
+            if self._should_notify_project_event(task, project_name, "project_complete"):
+                self.notify(f"项目完成：{project_name}，任务 id：{task.task_id}", title="LaTeXTransPlus")
+        elif event_type == "project_error":
+            if self._should_notify_project_event(task, project_name, "project_error"):
+                error = str(event.get("error") or "未知异常")
+                self.notify(
+                    f"发生异常：{project_name}，任务 id：{task.task_id}，错误：{error}",
+                    title="LaTeXTransPlus",
+                    severity="error",
+                )
+
+        if self._task_is_finished(task) and not task.completion_notified:
+            task.completion_notified = True
+            self.notify(f"任务全部完成：{task.task_id}", title="LaTeXTransPlus")
+
+    def _should_notify_project_event(self, task: TaskViewState, project_name: str, event_type: str) -> bool:
+        """返回项目终态事件是否尚未发过通知，并记录本次通知键。"""
+        notify_key = (event_type, project_name)
+        if notify_key in task.notified_project_events:
+            return False
+        task.notified_project_events.add(notify_key)
+        return True
+
+    def _notify_empty_task_failure(self, task: TaskViewState, error: str) -> None:
+        """在没有可映射项目的任务失败时发出任务级异常和终态通知。"""
+        self.notify(
+            f"发生异常：{task.task_id}，错误：{error}",
+            title="LaTeXTransPlus",
+            severity="error",
         )
-        last_error = next((event.get("error") for event in reversed(task.events) if event.get("error")), None)
-        if last_error:
-            summary = f"{summary}，错误 {last_error}"
-        self.query_one("#progress-summary", Static).update(summary)
-        self.query_one("#task-progress", ProgressBar).update(total=task.total, progress=finished)
+        if not task.completion_notified:
+            task.completion_notified = True
+            self.notify(f"任务全部完成：{task.task_id}", title="LaTeXTransPlus")
 
     def _selected_project(self) -> ProjectViewState | None:
         """Return the currently selected project state."""
@@ -747,6 +776,16 @@ class LaTeXTransTuiApp(App[None]):
         if not tasks and self.current_task is not None:
             tasks = [self.current_task]
         return [(task, project) for task in tasks for project in task.projects]
+
+    def _task_is_finished(self, task: TaskViewState) -> bool:
+        """返回任务是否所有已知条目都已完成或失败。"""
+        return task.total > 0 and task.completed + task.failed >= task.total
+
+    def _task_is_running(self, task: TaskViewState) -> bool:
+        """返回任务是否仍有条目正在处理。"""
+        if any(project.status == ProjectStatus.RUNNING for project in task.projects):
+            return True
+        return task.total > 0 and task.completed + task.failed < task.total
 
     def _next_task_id(self) -> str:
         """Return the next stable task identifier for a submitted UI task."""
@@ -1430,7 +1469,6 @@ class LaTeXTransTuiApp(App[None]):
             return
         task = self.current_task
         task.total = len(task.inputs)
-        self._refresh_progress_widgets(task)
         self.run_current_task(task)
 
     @work(thread=True, exclusive=True)
@@ -1453,6 +1491,7 @@ class LaTeXTransTuiApp(App[None]):
             )
         except Exception as exc:
             if task.input_type == "remote" and task.total == 0:
+                self.call_from_thread(self._notify_empty_task_failure, task, str(exc))
                 return
             project_name = task.running_project or (task.inputs[0] if task.inputs else "task")
             self.call_from_thread(
