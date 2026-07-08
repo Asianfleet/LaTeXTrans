@@ -307,6 +307,22 @@ class TuiTaskProjectSemanticsTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("running-task-project", running_labels[1].classes)
             self.assertNotIn("running-task-project", finished_label.classes)
 
+    async def test_sidebar_does_not_mark_terms_ready_task_orange(self):
+        """确认等待术语确认的项目已停止，不应按进行中任务染色。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+
+        async with app.run_test() as pilot:
+            task = TaskViewState(input_type="arxiv", inputs=["paper"], task_id="task-1", total=1)
+            task.projects.append(ProjectViewState(project_name="paper", status=ProjectStatus.TERMS_READY))
+            app.tasks = [task]
+
+            app.refresh_project_list()
+            await pilot.pause()
+
+            list_view = app.query_one("#project-list", ListView)
+            label = list_view.children[0].query_one(Static)
+            self.assertNotIn("running-task-project", label.classes)
+
     async def test_sidebar_selection_uses_project_task_identity(self):
         """确认侧栏选择项目时按任务 id 和项目名定位详情。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)

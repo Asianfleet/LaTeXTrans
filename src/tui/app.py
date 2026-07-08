@@ -785,7 +785,16 @@ class LaTeXTransTuiApp(App[None]):
         """返回任务是否仍有条目正在处理。"""
         if any(project.status == ProjectStatus.RUNNING for project in task.projects):
             return True
-        return task.total > 0 and task.completed + task.failed < task.total
+        return task.total > 0 and self._stopped_project_count(task) < task.total
+
+    def _stopped_project_count(self, task: TaskViewState) -> int:
+        """返回已离开后台处理状态的项目数量。"""
+        stopped_statuses = {
+            ProjectStatus.COMPLETED,
+            ProjectStatus.FAILED,
+            ProjectStatus.TERMS_READY,
+        }
+        return sum(1 for project in task.projects if project.status in stopped_statuses)
 
     def _next_task_id(self) -> str:
         """Return the next stable task identifier for a submitted UI task."""
