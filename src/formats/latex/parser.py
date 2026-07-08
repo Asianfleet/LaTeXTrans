@@ -167,6 +167,27 @@ class LatexParser:
             self.env_count += 1
             env_name = result.group(1)
             env_content = result.group(0)
+
+            # --- 修复同类型环境嵌套时的边界匹配错误 ---
+            # 非贪婪正则 (.*?) 在匹配同类型嵌套环境（如 itemize 嵌套 itemize）时,
+            # 会从外层 \begin{env} 开始，在内层 \end{env} 就停止，
+            # 导致应该先提取内层环境的却被合并为一个大块。
+            # 此处检查提取内容中同类型 \begin/\end 的数量是否配对：
+            # 若 begin > end，说明匹配越过了外层 begin 到内层 end，
+            # 此时回缩到最内层 \begin{env_name}，优先提取内层环境。
+            _escaped_name = re.escape(env_name)
+            _begin_tag = re.compile(rf"\\begin\{{{_escaped_name}\}}")
+            _end_tag = re.compile(rf"\\end\{{{_escaped_name}\}}")
+            begin_count = len(_begin_tag.findall(env_content))
+            end_count = len(_end_tag.findall(env_content))
+
+            if begin_count > end_count:
+                # 找到匹配内容中最后一个 \begin{env_name}（最内层）
+                # 从那里开始重新界定 env_content，只提取最内层环境
+                last_begin = list(_begin_tag.finditer(env_content))[-1]
+                env_content = env_content[last_begin.start():]
+            # --- 修复结束 ---
+
             placeholders_cap_in_env = re.findall(placeholder_pattern_cap, env_content)
 
             need_trans = True
