@@ -200,6 +200,21 @@ class LatexConstructorLanguageSupportTests(unittest.TestCase):
         self.assertNotIn("\\usepackage{luatexja}", result)
         self.assertNotIn("\\usepackage{kotex}", result)
 
+    def test_constructor_reports_missing_main_tex_without_stat_none_error(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            constructor = LatexConstructor(
+                sections=[],
+                captions=[],
+                envs=[],
+                inputs=[],
+                newcommands=[],
+                output_latex_dir=tmp_dir,
+                target_language="ch",
+            )
+
+            with self.assertRaisesRegex(FileNotFoundError, "No main TeX file found"):
+                constructor.construct()
+
 
 class LatexCompilerLanguageTests(unittest.TestCase):
     def test_engine_order_for_supported_languages(self):
