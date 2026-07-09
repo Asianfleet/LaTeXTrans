@@ -64,6 +64,23 @@ class TuiStateTests(unittest.TestCase):
             r"D:\out\project_terms_decisions.json",
         )
 
+    def test_review_required_event_marks_project_terms_ready(self):
+        """等待术语确认的项目应显示为术语就绪，而不是失败。"""
+        state = TaskViewState(input_type="arxiv", inputs=["2508.18791"], total=1)
+        state.apply_event(
+            {
+                "type": "project_error",
+                "project_name": "2508.18791",
+                "status": "needs_term_review",
+                "project_terms_path": r"D:\out\project_terms.csv",
+                "project_terms_decisions_path": r"D:\out\project_terms_decisions.json",
+            }
+        )
+
+        self.assertEqual(state.projects[0].status, ProjectStatus.TERMS_READY)
+        self.assertEqual(state.completed, 0)
+        self.assertEqual(state.failed, 0)
+
     def test_project_error_updates_failed_count(self):
         """project_error events should mark failed projects and count them."""
         state = TaskViewState(input_type="remote", inputs=["https://example.test/paper.zip"])

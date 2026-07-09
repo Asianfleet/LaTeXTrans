@@ -77,8 +77,8 @@ class TaskViewState:
 
         if event_type in {"project_complete", "project_error"}:
             project = self._get_or_create_project(str(event.get("project_name") or "project"))
-            project.status = ProjectStatus.COMPLETED if event_type == "project_complete" else ProjectStatus.FAILED
             self._copy_project_fields(project, event)
+            project.status = self._project_status_from_event(event_type, event)
             self.completed = sum(1 for item in self.projects if item.status == ProjectStatus.COMPLETED)
             self.failed = sum(1 for item in self.projects if item.status == ProjectStatus.FAILED)
             return
@@ -107,3 +107,11 @@ class TaskViewState:
         ):
             if key in event:
                 setattr(project, key, event[key])
+
+    def _project_status_from_event(self, event_type: object, event: dict[str, Any]) -> ProjectStatus:
+        """Return the project status represented by a terminal runtime event."""
+        if event.get("status") == "needs_term_review":
+            return ProjectStatus.TERMS_READY
+        if event_type == "project_complete":
+            return ProjectStatus.COMPLETED
+        return ProjectStatus.FAILED

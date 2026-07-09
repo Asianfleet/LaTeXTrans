@@ -719,6 +719,7 @@ class LaTeXTransTuiApp(App[None]):
         project = self._selected_project()
         if project is not None and project.project_name == str(event.get("project_name") or ""):
             self._refresh_project_log(project)
+            self._refresh_terms_table(project)
 
     def _notify_task_event(self, event: dict[str, object], task: TaskViewState) -> None:
         """根据任务事件发送轻量通知，不依赖已删除的进度页。"""
@@ -728,7 +729,10 @@ class LaTeXTransTuiApp(App[None]):
             if self._should_notify_project_event(task, project_name, "project_complete"):
                 self.notify(f"项目完成：{project_name}，任务 id：{task.task_id}", title="LaTeXTransPlus")
         elif event_type == "project_error":
-            if self._should_notify_project_event(task, project_name, "project_error"):
+            if event.get("status") == "needs_term_review":
+                if self._should_notify_project_event(task, project_name, "project_terms_ready"):
+                    self.notify(f"术语表已生成：{project_name}，任务 id：{task.task_id}", title="LaTeXTransPlus")
+            elif self._should_notify_project_event(task, project_name, "project_error"):
                 error = str(event.get("error") or "未知异常")
                 self.notify(
                     f"发生异常：{project_name}，任务 id：{task.task_id}，错误：{error}",
@@ -779,7 +783,7 @@ class LaTeXTransTuiApp(App[None]):
 
     def _task_is_finished(self, task: TaskViewState) -> bool:
         """返回任务是否所有已知条目都已完成或失败。"""
-        return task.total > 0 and task.completed + task.failed >= task.total
+        return task.total > 0 and self._stopped_project_count(task) >= task.total
 
     def _task_is_running(self, task: TaskViewState) -> bool:
         """返回任务是否仍有条目正在处理。"""
@@ -1181,10 +1185,10 @@ class LaTeXTransTuiApp(App[None]):
         table = self.query_one("#terms-table", DataTable)
         table.clear(columns=True)
         table.add_columns("术语", "译文")
-        if not project.project_terms_path:
+        terms_path = self._project_terms_path(project)
+        if terms_path is None:
             return
 
-        terms_path = Path(project.project_terms_path)
         try:
             with terms_path.open("r", encoding="utf-8", newline="") as terms_file:
                 rows = list(csv.reader(terms_file))
@@ -1195,6 +1199,19 @@ class LaTeXTransTuiApp(App[None]):
         for row in rows[1:]:
             if len(row) >= 2:
                 table.add_row(row[0], row[1])
+
+    def _project_terms_path(self, project: ProjectViewState) -> Path | None:
+        """Return the terminology CSV path for a project, including output-dir fallback."""
+        if project.project_terms_path:
+            terms_path = Path(project.project_terms_path)
+            if terms_path.is_file():
+                return terms_path
+        if project.output_dir:
+            fallback_path = Path(project.output_dir) / "project_terms.csv"
+            if fallback_path.is_file():
+                project.project_terms_path = str(fallback_path)
+                return fallback_path
+        return None
 
     def _initialize_zotero_results_table(self) -> None:
         """初始化 Zotero 结果表的固定列。"""

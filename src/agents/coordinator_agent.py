@@ -94,8 +94,10 @@ def build_workflow_result(
     validation_summary: Dict[str, int],
     validation_failed: bool,
     error: Optional[str] = None,
+    project_terms_path: Optional[str] = None,
+    project_terms_decisions_path: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return {
+    result = {
         "project_name": project_name,
         "ok": not validation_failed and error is None,
         "pdf_path": pdf_path,
@@ -103,6 +105,11 @@ def build_workflow_result(
         "validation_summary": validation_summary,
         "error": error,
     }
+    if project_terms_path is not None:
+        result["project_terms_path"] = project_terms_path
+    if project_terms_decisions_path is not None:
+        result["project_terms_decisions_path"] = project_terms_decisions_path
+    return result
 
 
 def should_run_terminology_scan(config: Dict[str, Any]) -> bool:
@@ -345,6 +352,7 @@ class CoordinatorAgent:
             )
 
         terminology_config = TerminologyConfig.from_config(self.config or {})
+        terminology_result: Dict[str, Any] = {}
         if should_run_terminology_scan(self.config or {}):
             terminology_agent = TerminologyAgent(
                 config=self.config,
@@ -406,6 +414,8 @@ class CoordinatorAgent:
                 errors_report_path=errors_report_path,
                 validation_summary=validation_summary,
                 validation_failed=validation_failed,
+                project_terms_path=terminology_result.get("project_terms_path"),
+                project_terms_decisions_path=terminology_result.get("project_terms_decisions_path"),
             )
 
         generator_agent = GeneratorAgent(config=self.config,
@@ -423,6 +433,8 @@ class CoordinatorAgent:
                 validation_summary=validation_summary,
                 validation_failed=True,
                 error=str(e),
+                project_terms_path=terminology_result.get("project_terms_path"),
+                project_terms_decisions_path=terminology_result.get("project_terms_decisions_path"),
             )
         
         if PDF_file_path:
@@ -443,6 +455,8 @@ class CoordinatorAgent:
                 errors_report_path=errors_report_path,
                 validation_summary=validation_summary,
                 validation_failed=validation_failed,
+                project_terms_path=terminology_result.get("project_terms_path"),
+                project_terms_decisions_path=terminology_result.get("project_terms_decisions_path"),
             )
         else:
             print(f"🤖🚧 {self.name}: Failed to translated {os.path.basename(self.project_dir)}.")
@@ -453,6 +467,8 @@ class CoordinatorAgent:
                 validation_summary=validation_summary,
                 validation_failed=True,
                 error="PDF generation returned no output path",
+                project_terms_path=terminology_result.get("project_terms_path"),
+                project_terms_decisions_path=terminology_result.get("project_terms_decisions_path"),
             )
 
     async def workflow_latextrans_with_existing_terms_async(self) -> Dict[str, Any]:

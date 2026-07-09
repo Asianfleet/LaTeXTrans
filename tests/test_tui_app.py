@@ -709,6 +709,34 @@ class TuiTaskEventTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(any("runner failed" in message for message in messages))
             self.assertIn("任务全部完成：task-1", messages)
 
+    async def test_review_required_event_notifies_terms_ready_and_task_completion(self):
+        """确认等待术语确认不会弹异常通知，且会结束当前任务。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test():
+            app.current_task = TaskViewState(
+                input_type="arxiv",
+                inputs=["2508.18791"],
+                task_id="task-1",
+                total=1,
+            )
+            app.tasks = [app.current_task]
+
+            with patch.object(app, "notify") as notify:
+                app.handle_runtime_event(
+                    {
+                        "type": "project_error",
+                        "project_name": "2508.18791",
+                        "status": "needs_term_review",
+                        "project_terms_path": r"D:\out\project_terms.csv",
+                    },
+                    app.current_task,
+                )
+
+            messages = [call.args[0] for call in notify.call_args_list]
+            self.assertTrue(any("术语表已生成：2508.18791" in message for message in messages))
+            self.assertFalse(any("发生异常：2508.18791" in message for message in messages))
+            self.assertIn("任务全部完成：task-1", messages)
+
     async def test_project_log_event_updates_selected_detail_log(self):
         """确认项目日志事件会实时写入当前详情页日志控件。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
@@ -1241,6 +1269,35 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(terms_table.get_cell_at((0, 1)), "图")
                 self.assertEqual(terms_table.get_cell_at((1, 0)), "Model")
                 self.assertEqual(terms_table.get_cell_at((1, 1)), "模型")
+
+    async def test_refresh_detail_page_discovers_terms_table_from_output_dir(self):
+        """确认运行中项目即使未收到术语路径事件，也会从输出目录读取术语表。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        with TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            terms_path = output_dir / "project_terms.csv"
+            terms_path.write_text(
+                "Source Term,Target Translation\nGraph,图\n",
+                encoding="utf-8",
+            )
+
+            async with app.run_test():
+                app.current_task = TaskViewState(input_type="local", inputs=["paper"])
+                app.current_task.projects.append(
+                    ProjectViewState(
+                        project_name="paper",
+                        status=ProjectStatus.RUNNING,
+                        output_dir=str(output_dir),
+                    )
+                )
+                app.selected_project_name = "paper"
+
+                app.refresh_detail_page()
+
+                terms_table = app.query_one("#terms-table", DataTable)
+                self.assertEqual(terms_table.row_count, 1)
+                self.assertEqual(terms_table.get_cell_at((0, 0)), "Graph")
+                self.assertEqual(terms_table.get_cell_at((0, 1)), "图")
 
 
 class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
