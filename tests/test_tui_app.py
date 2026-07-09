@@ -1110,6 +1110,45 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
                 render_width = sum(column.get_render_width(errors_table) for column in errors_table.ordered_columns)
                 self.assertLessEqual(render_width, errors_table.size.width or 80)
 
+    async def test_refresh_detail_page_discovers_error_report_from_output_dir(self):
+        """确认运行中项目即使未收到错误报告路径事件，也会从输出目录读取错误报告。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        with TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            (output_dir / "errors_report.json").write_text(
+                json.dumps(
+                    [
+                        {
+                            "part": "sec",
+                            "num_or_ph": "1",
+                            "issues": [{"type": "command_mismatch", "message": "Missing command"}],
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            async with app.run_test():
+                app.current_task = TaskViewState(input_type="local", inputs=["paper"])
+                app.current_task.projects.append(
+                    ProjectViewState(
+                        project_name="paper",
+                        status=ProjectStatus.RUNNING,
+                        output_dir=str(output_dir),
+                    )
+                )
+                app.selected_project_name = "paper"
+
+                app.refresh_detail_page()
+
+                errors_table = app.query_one("#errors-table", DataTable)
+                self.assertEqual(errors_table.row_count, 1)
+                self.assertEqual(errors_table.get_cell_at((0, 0)), "章节 1")
+                self.assertEqual(errors_table.get_cell_at((0, 1)), "命令")
+                self.assertEqual(errors_table.get_cell_at((0, 2)).plain, "Missing command")
+                self.assertEqual(errors_table.get_cell_at((0, 3)).plain, "未解决")
+
     async def test_errors_table_uses_available_detail_width_when_hidden(self):
         """确认错误记录 tab 隐藏刷新时仍按详情页可用宽度分配列宽。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)

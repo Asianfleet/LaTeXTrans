@@ -1022,8 +1022,9 @@ class LaTeXTransTuiApp(App[None]):
 
     def _error_reports_with_status(self, project: ProjectViewState) -> list[tuple[dict[str, object], str]]:
         """读取最终和初始错误报告，合并为带解决状态的展示行。"""
-        final_reports = self._read_error_report(project.errors_report_path)
-        initial_path = self._initial_error_report_path(project.errors_report_path)
+        report_path = self._project_errors_report_path(project)
+        final_reports = self._read_error_report(str(report_path) if report_path else None)
+        initial_path = self._initial_error_report_path(str(report_path) if report_path else None)
         initial_reports = self._read_error_report(str(initial_path) if initial_path else None)
         if not final_reports and not initial_reports:
             if project.error:
@@ -1060,6 +1061,19 @@ class LaTeXTransTuiApp(App[None]):
         if not report_path:
             return None
         return Path(report_path).parent / "initial_errors_report.json"
+
+    def _project_errors_report_path(self, project: ProjectViewState) -> Path | None:
+        """返回项目错误报告路径，必要时从输出目录发现并回填。"""
+        if project.errors_report_path:
+            report_path = Path(project.errors_report_path)
+            if report_path.is_file():
+                return report_path
+        if project.output_dir:
+            fallback_path = Path(project.output_dir) / "errors_report.json"
+            if fallback_path.is_file():
+                project.errors_report_path = str(fallback_path)
+                return fallback_path
+        return None
 
     def _error_report_key(self, report: dict[str, object]) -> tuple[str, str]:
         """返回用于判断同一错误位置是否仍未解决的稳定键。"""
