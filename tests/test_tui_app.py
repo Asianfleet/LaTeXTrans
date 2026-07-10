@@ -148,13 +148,31 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(app.query_one("#entry-actions"))
 
             form_children = [child.id for child in app.query_one("#entry-form").children]
-            self.assertEqual(
-                form_children[:4],
-                ["app-title", "batch-input", "entry-actions", "entry-error"],
-            )
+            self.assertEqual(form_children[:3], ["app-title", "entry-actions", "entry-error"])
             action_children = [child.id for child in app.query_one("#entry-actions").children]
-            self.assertEqual(action_children, ["input-type-select", "start-task-button"])
+            self.assertEqual(action_children, ["input-type-select", "batch-input", "start-task-button"])
             self.assertEqual(str(app.query_one("#start-task-button", Button).label), "发送")
+
+    async def test_entry_controls_match_select_row_height(self):
+        """确认入口页输入控件位于同一行，并匹配 select 的真实高度。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            entry_actions = app.query_one("#entry-actions")
+            input_type_select = app.query_one("#input-type-select", Select)
+            batch_input = app.query_one("#batch-input", TextArea)
+            start_button = app.query_one("#start-task-button", Button)
+
+            self.assertEqual(entry_actions.region.height, input_type_select.region.height)
+            self.assertEqual(input_type_select.region.height, 3)
+            self.assertEqual(batch_input.region.y, input_type_select.region.y)
+            self.assertEqual(start_button.region.y, input_type_select.region.y)
+            self.assertEqual(batch_input.region.height, input_type_select.region.height)
+            self.assertEqual(start_button.region.height, input_type_select.region.height)
+            self.assertTrue(start_button.flat)
+            self.assertEqual(start_button.styles.border.top[0], batch_input.styles.border.top[0])
+            self.assertEqual(start_button.styles.border.top[0], "tall")
 
     async def test_submit_entry_form_creates_task_stays_on_entry_and_notifies(self):
         """确认有效入口表单会创建任务、留在入口页并发出开始通知。"""

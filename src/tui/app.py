@@ -240,7 +240,7 @@ class LaTeXTransTuiApp(App[None]):
     }
 
     #entry-form {
-        width: 70%;
+        width: 80%;
         min-width: 50;
         max-width: 90;
         height: auto;
@@ -256,9 +256,9 @@ class LaTeXTransTuiApp(App[None]):
     }
 
     #batch-input {
-        width: 100%;
-        height: 8;
-        margin: 0 0 1 0;
+        width: 1fr;
+        height: 3;
+        margin: 0;
     }
 
     #entry-actions {
@@ -267,12 +267,18 @@ class LaTeXTransTuiApp(App[None]):
     }
 
     #input-type-select {
-        width: 24;
+        width: 22;
     }
 
     #start-task-button {
-        dock: right;
-        width: 10;
+        width: 4;
+        height: 3;
+        border: tall $border-blurred;
+    }
+
+    #start-task-button:hover,
+    #start-task-button:focus {
+        border: tall $border;
     }
 
     #entry-error {
@@ -382,7 +388,6 @@ class LaTeXTransTuiApp(App[None]):
                 with Vertical(id=PAGE_ENTRY):
                     with Vertical(id="entry-form"):
                         yield Static("LaTeXTransPlus", id="app-title")
-                        yield TextArea(id="batch-input")
                         with Horizontal(id="entry-actions"):
                             yield Select(
                                 [
@@ -392,6 +397,7 @@ class LaTeXTransTuiApp(App[None]):
                                 ],
                                 id="input-type-select",
                             )
+                            yield TextArea(id="batch-input")
                             yield Button("发送", id="start-task-button", flat=True)
                         yield Static("", id="entry-error")
                 with Vertical(id=PAGE_DETAIL):
