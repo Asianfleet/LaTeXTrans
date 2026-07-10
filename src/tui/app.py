@@ -271,7 +271,8 @@ class LaTeXTransTuiApp(App[None]):
     }
 
     #start-task-button {
-        width: 4;
+        width: 10;
+        min-width: 10;
         height: 3;
         border: tall $border-blurred;
     }
