@@ -715,6 +715,37 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("p", active_shortcuts)
             self.assertNotIn("t", active_shortcuts)
 
+    async def test_zotero_search_input_enter_triggers_search(self):
+        """确认 Zotero 搜索输入框聚焦时按 Enter 会触发搜索。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            app.switch_page(PAGE_DETAIL)
+            app.query_one("#detail-tabs ContentTabs").focus()
+            app.query_one("#detail-tabs").active = "zotero-tab"
+            search_input = app.query_one("#zotero-search-input", Input)
+            search_input.value = "Paper"
+            search_input.focus()
+
+            with patch.object(app, "search_zotero_items") as search:
+                await pilot.press("enter")
+                await pilot.pause()
+
+            search.assert_called_once_with()
+
+    async def test_zotero_search_input_footer_shows_enter_search(self):
+        """确认 Zotero 搜索输入框聚焦时 Footer 显示 Enter=搜索。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            app.switch_page(PAGE_DETAIL)
+            app.query_one("#detail-tabs ContentTabs").focus()
+            app.query_one("#detail-tabs").active = "zotero-tab"
+            search_input = app.query_one("#zotero-search-input", Input)
+            search_input.focus()
+            await pilot.pause()
+
+            self.assertIn("enter", set(app.active_bindings))
+            self.assertEqual(app.active_bindings["enter"].binding.description, "搜索")
+
     async def test_config_field_change_persists_immediately_and_refreshes_preview(self):
         """确认配置字段变化后会即时保存 UI 配置并刷新 TOML 预览。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)

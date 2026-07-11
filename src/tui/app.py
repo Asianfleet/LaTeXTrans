@@ -275,6 +275,21 @@ class EntryBatchTextArea(TextArea):
             app.submit_entry_form()
 
 
+class ZoteroSearchInput(Input):
+    """Zotero 搜索输入框，负责把 Enter 解释为搜索。"""
+
+    BINDINGS = [
+        *Input.BINDINGS,
+        Binding("enter", "submit_search", "搜索", priority=True),
+    ]
+
+    def action_submit_search(self) -> None:
+        """提交当前 Zotero 搜索词。"""
+        app = self.app
+        if hasattr(app, "search_zotero_items"):
+            app.search_zotero_items()
+
+
 class ConfigTabbedContent(TabbedContent):
     """设置页 tab 容器，提供只在设置上下文显示的 tab 快捷键。"""
 
@@ -580,7 +595,7 @@ class LaTeXTransTuiApp(App[None]):
                         with TabPane("Zotero", id="zotero-tab"):
                             with Horizontal(id="zotero-controls"):
                                 yield Select([], id="zotero-library-select")
-                                yield Input(id="zotero-search-input")
+                                yield ZoteroSearchInput(id="zotero-search-input")
                                 yield Button("搜索", id="zotero-search-button", flat=True)
                                 yield Button("自动匹配", id="zotero-auto-match-button", flat=True)
                                 yield Rule(orientation="vertical", id="zotero-import-rule")
