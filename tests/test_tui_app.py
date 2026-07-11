@@ -584,7 +584,6 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(app.query_one("#config-tabs", TabbedContent))
                 self.assertEqual(app.query_one("#config-target_language", Select).value, "ja")
                 self.assertEqual(app.query_one("#config-source_language", Select).value, "en")
-                self.assertEqual(app.query_one("#config-paper_list", TextArea).text, "2508.18791\n2407.01648")
                 self.assertTrue(app.query_one("#config-update_term", Switch).value)
                 self.assertEqual(
                     app.query_one("#config-validation-issues-placeholder_mismatch-severity", Select).value,
@@ -602,6 +601,8 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
                     app.query_one("#config-sys_name", Input)
                 with self.assertRaises(NoMatches):
                     app.query_one("#config-version", Input)
+                with self.assertRaises(NoMatches):
+                    app.query_one("#config-paper_list", TextArea)
 
     async def test_config_page_has_no_manual_save_or_reload_buttons(self):
         """确认配置页不再提供保存或重载按钮，避免手动保存语义漂移。"""
@@ -637,7 +638,7 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             "version": "0.1.0",
             "source_language": "en",
             "target_language": "ja",
-            "paper_list": [],
+            "paper_list": ["2508.18791"],
             "tex_sources_dir": "tex source",
             "output_dir": "outputs",
             "category": {},
@@ -666,7 +667,6 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
 
                 app.query_one("#config-target_language", Select).value = "fr"
                 app.query_one("#config-source_language", Select).value = "de"
-                app.query_one("#config-paper_list", TextArea).text = "2508.18791\n2407.01648\n"
                 app.query_one("#config-category", TextArea).text = '{"cs": ["cs.LG"]}'
                 app.query_one("#config-update_term", Switch).value = True
                 app.query_one("#config-terminology-max_llm_candidates", Input).value = "12"
@@ -684,7 +684,7 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(saved["version"], "0.1.0")
             self.assertEqual(saved["target_language"], "fr")
             self.assertEqual(saved["source_language"], "de")
-            self.assertEqual(saved["paper_list"], ["2508.18791", "2407.01648"])
+            self.assertEqual(saved["paper_list"], ["2508.18791"])
             self.assertEqual(saved["category"], {"cs": ["cs.LG"]})
             self.assertEqual(saved["update_term"], "True")
             self.assertEqual(saved["terminology"]["max_llm_candidates"], 12)

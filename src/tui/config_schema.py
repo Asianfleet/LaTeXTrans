@@ -51,7 +51,6 @@ CONFIG_FIELDS: tuple[ConfigField, ...] = (
     ConfigField(("target_language",), "目标语言", "select", "基础", "ch", LANGUAGE_OPTIONS),
     ConfigField(("tex_sources_dir",), "TeX 源目录", "input", "基础", "tex source"),
     ConfigField(("output_dir",), "输出目录", "input", "基础", "outputs"),
-    ConfigField(("paper_list",), "arXiv ID 列表", "textarea", "基础", ()),
     ConfigField(("category",), "术语领域", "textarea", "基础", {}),
     ConfigField(("update_term",), "动态术语更新", "switch", "基础", "False"),
     ConfigField(("mode",), "翻译模式", "select", "基础", "plain", MODE_OPTIONS),
@@ -111,8 +110,6 @@ def set_config_value(config: dict[str, Any], path: tuple[str, ...], value: Any) 
 def form_text_for_field(field: ConfigField, config: dict[str, Any]) -> str:
     """把配置值转换为设置页文本控件内容。"""
     value = get_config_value(config, field.path, field.default)
-    if field.path == ("paper_list",):
-        return "\n".join(str(item) for item in (value or []))
     if field.path == ("category",):
         return json.dumps(value or {}, ensure_ascii=False)
     return "" if value is None else str(value)
@@ -146,8 +143,6 @@ def normalized_config_from_form(
 
 def parse_textarea_value(field: ConfigField, text: str) -> Any:
     """解析多行文本字段为配置值。"""
-    if field.path == ("paper_list",):
-        return [line.strip() for line in text.splitlines() if line.strip()]
     if field.path == ("category",):
         stripped = text.strip()
         if not stripped:
