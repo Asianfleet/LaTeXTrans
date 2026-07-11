@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
+from rich.cells import cell_len
 from rich.text import Text
 from textual.css.query import NoMatches
 from textual.widgets import (
@@ -23,12 +24,14 @@ from textual.widgets import (
 )
 
 from setup import load_requirements
+from src.tui import app as tui_app
 from src.tui.app import (
     PAGE_CONFIG,
     PAGE_DETAIL,
     PAGE_ENTRY,
     PAGE_TASKS,
     LaTeXTransTuiApp,
+    build_app_title,
     compact_progress_log_for_display,
 )
 from src.tui.history import TUI_PROJECT_METADATA_FILENAME
@@ -75,6 +78,37 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
         """确认项目详情页顶部和 Tab 标签之间保留间距。"""
         self.assertIn("#detail {", LaTeXTransTuiApp.DEFAULT_CSS)
         self.assertIn("padding-top: 1;", LaTeXTransTuiApp.DEFAULT_CSS)
+
+    def test_entry_form_allows_wide_art_title(self):
+        """确认入口表单宽度足够容纳多行艺术字标题。"""
+        self.assertIn("#entry-form {", LaTeXTransTuiApp.DEFAULT_CSS)
+        self.assertIn("max-width: 124;", LaTeXTransTuiApp.DEFAULT_CSS)
+
+    def test_app_title_keeps_art_lines_left_aligned(self):
+        """确认艺术字内部不逐行居中，避免短行错位。"""
+        self.assertIsNone(build_app_title().justify)
+        self.assertNotIn("text-align: center;", LaTeXTransTuiApp.DEFAULT_CSS)
+        self.assertIn("height: 6;", LaTeXTransTuiApp.DEFAULT_CSS)
+
+    def test_compact_art_title_is_narrower_than_wide_title(self):
+        """确认窄版艺术字存在，并且宽度小于宽屏艺术字。"""
+        compact_art = getattr(tui_app, "APP_TITLE_ART_COMPACT", "")
+        self.assertNotEqual("", compact_art)
+        wide_width = max(cell_len(line) for line in tui_app.APP_TITLE_ART.splitlines())
+        compact_width = max(cell_len(line) for line in compact_art.splitlines())
+        self.assertLess(compact_width, wide_width)
+
+    def test_app_title_selects_responsive_variant_for_width(self):
+        """确认标题按可用宽度选择宽版、窄版和普通标题。"""
+        title_for_width = getattr(tui_app, "build_app_title_for_width", None)
+        self.assertIsNotNone(title_for_width)
+
+        wide_width = tui_app.app_title_art_width(tui_app.APP_TITLE_ART)
+        compact_width = tui_app.app_title_art_width(tui_app.APP_TITLE_ART_COMPACT)
+
+        self.assertEqual(title_for_width(wide_width).plain, tui_app.APP_TITLE_ART)
+        self.assertEqual(title_for_width(wide_width - 1).plain, tui_app.APP_TITLE_ART_COMPACT)
+        self.assertEqual(title_for_width(compact_width - 1).plain, "LaTeXTransPlus")
 
     async def test_detail_page_applies_top_padding_above_tabs(self):
         """确认项目详情页实际应用顶部间距。"""
@@ -143,7 +177,12 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
         """确认入口页使用居中的标题、输入框、下拉菜单和发送按钮布局。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         async with app.run_test():
-            self.assertEqual(str(app.query_one("#app-title", Static).content), "LaTeXTransPlus")
+            title_content = app.query_one("#app-title", Static).content
+            self.assertIsInstance(title_content, Text)
+            title_plain = title_content.plain
+            self.assertGreaterEqual(len(title_plain.splitlines()), 6)
+            self.assertIn("████████", title_plain)
+            self.assertIn("╚══════╝", title_plain)
             self.assertIsNotNone(app.query_one("#entry-form"))
             self.assertIsNotNone(app.query_one("#entry-actions"))
 
@@ -173,6 +212,22 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(start_button.flat)
             self.assertEqual(start_button.styles.border.top[0], batch_input.styles.border.top[0])
             self.assertEqual(start_button.styles.border.top[0], "tall")
+
+    async def test_entry_title_updates_for_terminal_width(self):
+        """确认终端变窄时标题从宽版艺术字降级到窄版和普通标题。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+            title = app.query_one("#app-title", Static)
+            self.assertEqual(title.content.plain, tui_app.APP_TITLE_ART)
+
+            await pilot.resize_terminal(90, 40)
+            await pilot.pause()
+            self.assertEqual(title.content.plain, tui_app.APP_TITLE_ART_COMPACT)
+
+            await pilot.resize_terminal(30, 40)
+            await pilot.pause()
+            self.assertEqual(title.content.plain, "LaTeXTransPlus")
 
     async def test_submit_entry_form_creates_task_stays_on_entry_and_notifies(self):
         """确认有效入口表单会创建任务、留在入口页并发出开始通知。"""

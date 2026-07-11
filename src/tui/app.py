@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 import toml
+from rich.cells import cell_len
 from rich.text import Text
 from rich.syntax import Syntax
 from textual import events, work
@@ -69,6 +70,87 @@ ERROR_PROBLEM_COLUMN_WIDTH = 24
 ERROR_STATUS_COLUMN_WIDTH = 8
 ERROR_MIN_CONTENT_COLUMN_WIDTH = 6
 PROGRESS_LOG_LINE_RE = re.compile(r"^\[[#-]+\]\s+\d{1,3}(?:\.\d+)?%")
+APP_TITLE_PLAIN = "LaTeXTransPlus"
+APP_TITLE_ART = "\n".join(
+    (
+        "  ██╗      █████╗ ████████╗███████╗██╗  ██╗████████╗██████╗  █████╗ ███╗   ██╗███████╗      ██╗",
+        "  ██║     ██╔══██╗╚══██╔══╝██╔════╝╚██╗██╔╝╚══██╔══╝██╔══██╗██╔══██╗████╗  ██║██╔════╝    ██████╗",
+        "  ██║     ███████║   ██║   █████╗   ╚███╔╝    ██║   ██████╔╝███████║██╔██╗ ██║███████╗    ╚═██╔═╝",
+        "  ██║     ██╔══██║   ██║   ██╔══╝   ██╔██╗    ██║   ██╔══██╗██╔══██║██║╚██╗██║╚════██║      ╚═╝",
+        "  ███████╗██║  ██║   ██║   ███████╗██╔╝ ██╗   ██║   ██║  ██║██║  ██║██║ ╚████║███████║",
+        "  ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝",
+    )
+)
+APP_TITLE_ART_COMPACT = "\n".join(
+    (
+        "  ██╗      █████╗ ████████╗███████╗██╗  ██╗████████╗      ██╗",
+        "  ██║     ██╔══██╗╚══██╔══╝██╔════╝╚██╗██╔╝╚══██╔══╝    ██████╗",
+        "  ██║     ███████║   ██║   █████╗   ╚███╔╝    ██║       ╚═██╔═╝",
+        "  ██║     ██╔══██║   ██║   ██╔══╝   ██╔██╗    ██║         ╚═╝",
+        "  ███████╗██║  ██║   ██║   ███████╗██╔╝ ██╗   ██║",
+        "  ╚══════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═╝  ╚═╝   ╚═╝",
+    )
+)
+APP_TITLE_LINE_STYLES = (
+    "bold bright_white",
+    "bold #dbeafe",
+    "bold #93c5fd",
+    "bold #60a5fa",
+    "bold #3b82f6",
+    "bold #1d4ed8",
+)
+
+
+def app_title_art_width(art: str) -> int:
+    """计算艺术字标题的最大终端显示宽度。"""
+    return max(cell_len(line) for line in art.splitlines())
+
+
+def build_art_title(art: str) -> Text:
+    """用入口页标题样式构建指定艺术字文本。"""
+    title = Text()
+    for index, line in enumerate(art.splitlines()):
+        if index:
+            title.append("\n")
+        title.append(line, style=APP_TITLE_LINE_STYLES[index])
+    return title
+
+
+def build_app_title() -> Text:
+    """构建入口页宽屏蓝白色多行艺术字标题。"""
+    return build_art_title(APP_TITLE_ART)
+
+
+def build_app_title_for_width(width: int) -> Text:
+    """根据可用宽度构建入口页标题，避免艺术字被终端换行错位。"""
+    if width >= app_title_art_width(APP_TITLE_ART):
+        return build_art_title(APP_TITLE_ART)
+    if width >= app_title_art_width(APP_TITLE_ART_COMPACT):
+        return build_art_title(APP_TITLE_ART_COMPACT)
+    return Text(APP_TITLE_PLAIN, style=APP_TITLE_LINE_STYLES[2])
+
+
+class ResponsiveAppTitle(Static):
+    """入口页标题控件，根据自身宽度切换宽版、窄版和普通标题。"""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        """初始化时先使用普通标题，等待布局完成后再按实际宽度刷新。"""
+        super().__init__(build_app_title_for_width(0), *args, **kwargs)
+
+    def on_mount(self) -> None:
+        """控件挂载后按当前宽度刷新标题。"""
+        self._refresh_for_width(self.size.width)
+
+    def on_resize(self, event: events.Resize) -> None:
+        """控件尺寸变化时按新的可绘制宽度刷新标题。"""
+        self._refresh_for_width(event.size.width)
+
+    def _refresh_for_width(self, width: int) -> None:
+        """按给定宽度更新标题内容。"""
+        next_title = build_app_title_for_width(width)
+        if isinstance(self.content, Text) and self.content.plain == next_title.plain:
+            return
+        self.update(next_title, layout=False)
 
 
 def compact_progress_log_for_display(log_text: str) -> str:
@@ -240,18 +322,18 @@ class LaTeXTransTuiApp(App[None]):
     }
 
     #entry-form {
-        width: 80%;
+        width: 100%;
         min-width: 50;
-        max-width: 90;
+        max-width: 124;
         height: auto;
         align-horizontal: center;
     }
 
     #app-title {
         width: 100%;
+        height: 6;
         content-align: center middle;
         text-style: bold;
-        text-align: center;
         margin: 0 0 2 0;
     }
 
@@ -388,7 +470,7 @@ class LaTeXTransTuiApp(App[None]):
             with ContentSwitcher(initial=PAGE_ENTRY, id="main-switcher"):
                 with Vertical(id=PAGE_ENTRY):
                     with Vertical(id="entry-form"):
-                        yield Static("LaTeXTransPlus", id="app-title")
+                        yield ResponsiveAppTitle(id="app-title")
                         with Horizontal(id="entry-actions"):
                             yield Select(
                                 [
