@@ -187,7 +187,17 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(app.query_one("#entry-actions"))
 
             form_children = [child.id for child in app.query_one("#entry-form").children]
-            self.assertEqual(form_children[:3], ["app-title", "entry-actions", "entry-error"])
+            self.assertEqual(
+                form_children,
+                [
+                    "entry-top-spacer",
+                    "app-title",
+                    "entry-actions",
+                    "entry-error",
+                    "entry-bottom-offset",
+                    "entry-bottom-spacer",
+                ],
+            )
             action_children = [child.id for child in app.query_one("#entry-actions").children]
             self.assertEqual(action_children, ["input-type-select", "batch-input", "start-task-button"])
             self.assertEqual(str(app.query_one("#start-task-button", Button).label), "发送")
@@ -212,6 +222,20 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(start_button.flat)
             self.assertEqual(start_button.styles.border.top[0], batch_input.styles.border.top[0])
             self.assertEqual(start_button.styles.border.top[0], "tall")
+
+    async def test_entry_actions_are_vertically_centered_in_entry_page(self):
+        """确认入口页把输入组件行作为垂直居中的布局锚点。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test(size=(140, 40)) as pilot:
+            await pilot.pause()
+
+            entry = app.query_one("#entry")
+            entry_actions = app.query_one("#entry-actions")
+
+            entry_center = entry.region.y + entry.region.height / 2
+            actions_center = entry_actions.region.y + entry_actions.region.height / 2
+
+            self.assertLessEqual(abs(actions_center - entry_center), 1)
 
     async def test_entry_title_updates_for_terminal_width(self):
         """确认终端变窄时标题从宽版艺术字降级到窄版和普通标题。"""

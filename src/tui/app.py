@@ -318,15 +318,24 @@ class LaTeXTransTuiApp(App[None]):
 
     #entry {
         align: center top;
-        padding-top: 3;
+        padding-top: 0;
     }
 
     #entry-form {
         width: 100%;
         min-width: 50;
         max-width: 124;
-        height: auto;
+        height: 100%;
         align-horizontal: center;
+    }
+
+    #entry-top-spacer,
+    #entry-bottom-spacer {
+        height: 1fr;
+    }
+
+    #entry-bottom-offset {
+        height: 6;
     }
 
     #app-title {
@@ -346,6 +355,7 @@ class LaTeXTransTuiApp(App[None]):
     #entry-actions {
         width: 100%;
         height: 3;
+        padding: 0 4;
     }
 
     #input-type-select {
@@ -470,6 +480,7 @@ class LaTeXTransTuiApp(App[None]):
             with ContentSwitcher(initial=PAGE_ENTRY, id="main-switcher"):
                 with Vertical(id=PAGE_ENTRY):
                     with Vertical(id="entry-form"):
+                        yield Static("", id="entry-top-spacer")
                         yield ResponsiveAppTitle(id="app-title")
                         with Horizontal(id="entry-actions"):
                             yield Select(
@@ -483,6 +494,8 @@ class LaTeXTransTuiApp(App[None]):
                             yield TextArea(id="batch-input")
                             yield Button("发送", id="start-task-button", flat=True)
                         yield Static("", id="entry-error")
+                        yield Static("", id="entry-bottom-offset")
+                        yield Static("", id="entry-bottom-spacer")
                 with Vertical(id=PAGE_DETAIL):
                     with TabbedContent(initial="tex-tab", id="detail-tabs"):
                         with TabPane("TeX", id="tex-tab"):
