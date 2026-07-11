@@ -6,6 +6,9 @@ from datetime import datetime
 from pathlib import Path
 
 from textual.app import App
+from textual import events
+from textual.css.query import NoMatches
+from textual.widgets import ContentSwitcher, TabbedContent
 from src.tui.app_parts.config_page import ConfigPageMixin
 from src.tui.app_parts.constants import (
     APP_TITLE_ART,
@@ -136,6 +139,25 @@ class LaTeXTransTuiApp(
             return
         self.theme = "nord"
         self.load_output_history()
+
+    def on_resize(self, event: events.Resize) -> None:
+        """终端尺寸变化后刷新依赖可视宽度的表格列。"""
+        if self.screen is None:
+            return
+        self.call_after_refresh(self._refresh_tables_after_resize)
+
+    def _refresh_tables_after_resize(self) -> None:
+        """按当前激活页面重算错误表和 Zotero 结果表的列宽。"""
+        try:
+            main_switcher = self.query_one("#main-switcher", ContentSwitcher)
+            detail_tabs = self.query_one("#detail-tabs", TabbedContent)
+        except NoMatches:
+            return
+        if main_switcher.current != PAGE_TASKS and self.selected_project_name is not None:
+            if detail_tabs.active == "errors-tab":
+                self._refresh_selected_errors_table()
+            if detail_tabs.active == "zotero-tab":
+                self._fit_zotero_results_table_columns()
 
 def run() -> None:
     """Run the LaTeXTransPlus terminal UI."""
