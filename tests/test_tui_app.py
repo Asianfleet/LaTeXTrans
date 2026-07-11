@@ -182,6 +182,26 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(import_button.styles.border.top[0], search_input.styles.border.top[0])
             self.assertEqual(search_button.styles.border.top[0], "tall")
 
+    async def test_empty_detail_tables_fill_available_tab_height(self):
+        """确认空术语表和错误记录表仍占满详情 tab 的剩余高度。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test(size=(120, 40)) as pilot:
+            app.current_task = TaskViewState(input_type="local", inputs=["paper"])
+            app.current_task.projects.append(ProjectViewState(project_name="paper", status=ProjectStatus.COMPLETED))
+            app.selected_project_name = "paper"
+            app.refresh_detail_page()
+            app.switch_page(PAGE_DETAIL)
+
+            tabs = app.query_one("#detail-tabs", TabbedContent)
+            for tab_id, table_id in [("terms-tab", "terms-table"), ("errors-tab", "errors-table")]:
+                tabs.active = tab_id
+                await pilot.pause()
+
+                table = app.query_one(f"#{table_id}", DataTable)
+
+                self.assertEqual(table.row_count, 0)
+                self.assertGreater(table.region.height, 10)
+
     async def test_switch_page_updates_content_switcher(self):
         """确认 switch_page 会更新主内容切换器当前页面。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)

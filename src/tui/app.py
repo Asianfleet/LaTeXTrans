@@ -376,6 +376,11 @@ class LaTeXTransTuiApp(App[None]):
         height: 1fr;
     }
 
+    #terms-table,
+    #errors-table {
+        height: 1fr;
+    }
+
     #entry {
         align: center top;
         padding-top: 0;
