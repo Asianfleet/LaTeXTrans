@@ -153,7 +153,10 @@ class LaTeXTransTuiApp(
             detail_tabs = self.query_one("#detail-tabs", TabbedContent)
         except NoMatches:
             return
-        if main_switcher.current != PAGE_TASKS and self.selected_project_name is not None:
+        if (
+            main_switcher.current == PAGE_DETAIL
+            and self.selected_project_name is not None
+        ):
             if detail_tabs.active == "errors-tab":
                 self._refresh_selected_errors_table()
             if detail_tabs.active == "zotero-tab":
