@@ -7,7 +7,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 class CliOnlyDistributionTests(unittest.TestCase):
-    def test_package_exposes_only_cli_entry_point(self):
+    def test_package_exposes_expected_cli_entry_points(self):
+        """确认发行包暴露原 CLI 和新增 TUI 入口。"""
         setup_tree = ast.parse((PROJECT_ROOT / "setup.py").read_text(encoding="utf-8"))
         setup_call = next(
             node
@@ -26,7 +27,8 @@ class CliOnlyDistributionTests(unittest.TestCase):
         )
         scripts = [item.value for item in console_scripts.elts]
 
-        self.assertEqual(scripts, ["latextrans=main:main"])
+        self.assertIn("latextrans=main:main", scripts)
+        self.assertIn("latextrans-tui=src.tui.app:run", scripts)
 
     def test_requirements_do_not_include_streamlit(self):
         requirements = (PROJECT_ROOT / "requirements.txt").read_text(encoding="utf-8")

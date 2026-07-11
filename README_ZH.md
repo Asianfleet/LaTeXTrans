@@ -179,6 +179,16 @@ Validator 会检查 command 数量、placeholder 保留情况和括号平衡。�
 
 # 📚 使用方法
 
+## 终端 UI
+
+LaTeXTransPlus 也提供基于 Textual 的终端 UI：
+
+```bash
+latextrans-tui
+```
+
+UI 每次任务只支持一种输入类型：arXiv ID 或 URL、本地项目路径或压缩包、远程压缩包 URL。它会显示项目级进度、结果文件、日志、校验报告和 UI 专用配置。Zotero 集成是可选动作，不会阻断翻译结果。
+
 ## 根据 arXiv ID 翻译
 
 ```bash

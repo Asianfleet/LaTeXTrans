@@ -11,3 +11,6 @@ async-lru==2.0.5
 async-timeout==5.0.1
 pandas==2.2.3
 datetime
+textual>=0.86.0
+tree-sitter>=0.25,<0.26
+tree-sitter-toml==0.7.0

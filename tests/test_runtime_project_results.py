@@ -11,6 +11,7 @@ from src.runtime import (
     run_projects,
     should_exit_with_failure,
 )
+from src.agents.tool_agents.base_tool_agent import BaseToolAgent
 
 
 class RuntimeProjectResultTests(unittest.TestCase):
@@ -842,6 +843,109 @@ target_language = "ch"
         self.assertEqual(complete_event["log_path"], r"D:\repo\outputs\ch_paper\latextrans.log")
         self.assertEqual(complete_event["pdf_path"], r"outputs\ch_paper\ch_paper.pdf")
         self.assertIsNone(complete_event["error"])
+
+    def test_run_projects_emits_and_writes_agent_log_events(self):
+        """Agent log callback should emit project_log events and write latextrans.log."""
+        events = []
+
+        class FakeToolAgent(BaseToolAgent):
+            """Fake tool agent that exercises BaseToolAgent.log."""
+
+            def __init__(self, config):
+                """Store config through the production base class."""
+                super().__init__(agent_name="FakeAgent", config=config)
+
+            def execute(self, data=None, **kwargs):
+                """Emit one agent log line."""
+                self.log("hello from callback")
+
+        class FakeCoordinatorAgent:
+            """Fake coordinator that runs one logging tool agent."""
+
+            def __init__(self, config, project_dir, output_dir):
+                """Keep the runtime-provided config for the fake workflow."""
+                self.config = config
+
+            def workflow_latextrans(self):
+                """Run the fake tool agent and return a successful result."""
+                FakeToolAgent(self.config).execute()
+                return {
+                    "ok": True,
+                    "pdf_path": None,
+                    "errors_report_path": None,
+                    "validation_summary": {"warnings": 0, "errors": 0, "total": 0},
+                    "error": None,
+                }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "outputs"
+            with patch("src.runtime.CoordinatorAgent", FakeCoordinatorAgent):
+                with redirect_stdout(StringIO()):
+                    run_projects(
+                        config={"target_language": "ch"},
+                        projects=[r"D:\tex source\paper"],
+                        output_dir=str(output_dir),
+                        event_callback=events.append,
+                    )
+
+            log_path = output_dir / "ch_paper" / "latextrans.log"
+            log_text = log_path.read_text(encoding="utf-8")
+
+        log_event = next(event for event in events if event["type"] == "project_log")
+        self.assertEqual(log_event["project_name"], "paper")
+        self.assertEqual(log_event["agent_name"], "FakeAgent")
+        self.assertEqual(log_event["level"], "info")
+        self.assertEqual(log_event["line"], "[FakeAgent] [INFO] hello from callback")
+        self.assertIn("[FakeAgent] [INFO] hello from callback", log_text)
+
+    def test_run_projects_routes_progress_updates_to_project_log(self):
+        """TUI-style runs should log progress updates without writing terminal output."""
+        from src.utils.progress import st
+
+        events = []
+
+        class FakeCoordinatorAgent:
+            """Fake coordinator that emits one progress update."""
+
+            def __init__(self, config, project_dir, output_dir):
+                """Accept the production coordinator constructor arguments."""
+                pass
+
+            def workflow_latextrans(self):
+                """Emit progress status lines and return a successful result."""
+                progress_bar = st.progress(0)
+                progress_bar.progress(50, text="halfway")
+                st.success("done")
+                return {
+                    "ok": True,
+                    "pdf_path": None,
+                    "errors_report_path": None,
+                    "validation_summary": {"warnings": 0, "errors": 0, "total": 0},
+                    "error": None,
+                }
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir) / "outputs"
+            stdout = StringIO()
+            with patch("src.runtime.CoordinatorAgent", FakeCoordinatorAgent):
+                with redirect_stdout(stdout):
+                    run_projects(
+                        config={"target_language": "ch"},
+                        projects=[r"D:\tex source\paper"],
+                        output_dir=str(output_dir),
+                        event_callback=events.append,
+                    )
+
+            log_path = output_dir / "ch_paper" / "latextrans.log"
+            log_text = log_path.read_text(encoding="utf-8")
+
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("halfway", log_text)
+        self.assertIn("done", log_text)
+        self.assertTrue(
+            any(event["type"] == "project_log" and "halfway" in event["line"] for event in events)
+        )
+        self.assertTrue(any(event["type"] == "project_log" and event["line"] == "done" for event in events))
 
     def test_run_projects_exception_event_includes_paths_and_null_result_fields(self):
         events = []

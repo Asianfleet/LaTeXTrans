@@ -11,6 +11,7 @@ import tarfile
 import regex
 import subprocess
 import os
+import shutil
 import requests
 from bs4 import BeautifulSoup
 from typing import List
@@ -463,6 +464,18 @@ def find_tex_files(dir):
     tex_files = [f for f in all_files if f.endswith('.tex')]
 
     return tex_files
+
+def has_latex_source_files(dir):
+    """
+    返回目录中是否存在当前解析器可处理的 TeX 源文件。
+    """
+    path = Path(dir)
+    if not path.is_dir():
+        return False
+    try:
+        return any(item.is_file() and item.suffix.lower() == ".tex" for item in path.rglob("*"))
+    except OSError:
+        return False
 
 def remove_comments(tex: str) -> str:
     """
@@ -920,11 +933,11 @@ def get_tex_url(arxiv_id: str, headers: dict) -> str:
 
 def is_already_downloaded(arxiv_id: str, save_dir: str) -> bool:
     """
-    检查 tar.gz 文件或已解压目录是否存在
+    检查 tar.gz 文件或有效的已解压 TeX 源码目录是否存在。
     """
     tar_path = os.path.join(save_dir, f"{arxiv_id}.tar.gz")
     extracted_dir = os.path.join(save_dir, arxiv_id)
-    return os.path.exists(tar_path) or os.path.isdir(extracted_dir)
+    return os.path.exists(tar_path) or has_latex_source_files(extracted_dir)
 
 def download_tex(arxiv_id: str, tex_url: str, save_dir: str, headers: dict):
     """
@@ -988,6 +1001,11 @@ def batch_download_arxiv_tex(arxiv_ids: List[str], save_dir: str = "./tex_source
             print(f"[SkIP] Already downloaded: {arxiv_id}")
             continue
 
+        extracted_dir = os.path.join(save_dir, arxiv_id)
+        if os.path.isdir(extracted_dir):
+            shutil.rmtree(extracted_dir)
+            print(f"[RETRY] Removed invalid existing source directory: {extracted_dir}")
+
         tex_url = get_tex_url(arxiv_id, headers)
         if tex_url:
             dir = download_tex(arxiv_id, tex_url, save_dir, headers)
@@ -1008,13 +1026,23 @@ def batch_download_arxiv_tex(arxiv_ids: List[str], save_dir: str = "./tex_source
             response.raise_for_status()
             with open(pdf_path, 'wb') as f:
                 f.write(response.content)
-            sys.stderr = open(os.devnull, 'w')
-            st.success(f"[SUCCESS] Downloaded PDF for {arxiv_id}")
-            sys.stderr = sys.__stderr__
+            previous_stderr = sys.stderr
+            devnull = open(os.devnull, 'w')
+            try:
+                sys.stderr = devnull
+                st.success(f"[SUCCESS] Downloaded PDF for {arxiv_id}")
+            finally:
+                sys.stderr = previous_stderr
+                devnull.close()
         except Exception as e:
-            sys.stderr = open(os.devnull, 'w')
-            st.error(f"[ERROR] Failed to download PDF for {arxiv_id}: {str(e)}")
-            sys.stderr = sys.__stderr__
+            previous_stderr = sys.stderr
+            devnull = open(os.devnull, 'w')
+            try:
+                sys.stderr = devnull
+                st.error(f"[ERROR] Failed to download PDF for {arxiv_id}: {str(e)}")
+            finally:
+                sys.stderr = previous_stderr
+                devnull.close()
 
     return source_dirs
 

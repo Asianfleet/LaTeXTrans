@@ -17,10 +17,12 @@ from src.formats.latex.utils import (
     get_profect_dirs,
 )
 from src.project_sources import RemoteArchiveDownloadError, download_remote_archive
+from src.utils.progress import progress_log_context
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 ProjectEventCallback = Callable[[Dict[str, Any]], None]
 ProjectContextCallback = Callable[[int, int, str], ContextManager[None]]
+ProjectLogCallback = Callable[[Dict[str, Any]], None]
 
 
 def project_output_dir(output_dir: str, target_language: str, project_dir: str) -> Path:
@@ -283,6 +285,40 @@ def should_exit_with_failure(project_status: Dict[str, List[Dict[str, Any]]]) ->
     return bool(project_status.get("failed_projects"))
 
 
+def _build_project_log_callback(
+    event_callback: Optional[ProjectEventCallback],
+    log_file: Any,
+    project_name: str,
+    project_dir: str,
+    project_output_path: str,
+    log_path: str,
+    write_file: bool = True,
+) -> ProjectLogCallback:
+    """创建写入项目日志文件并转发 runtime 日志事件的回调。"""
+
+    def project_log_callback(payload: Dict[str, Any]) -> None:
+        """写入单条 agent 日志，并向上层发出 project_log 事件。"""
+        line = str(payload.get("line") or payload.get("message") or "")
+        if line and write_file:
+            log_file.write(f"{line}\n")
+            log_file.flush()
+        if event_callback:
+            event_payload = {
+                "type": "project_log",
+                "project_name": project_name,
+                "project_dir": project_dir,
+                "output_dir": project_output_path,
+                "log_path": log_path,
+                "agent_name": payload.get("agent_name"),
+                "level": payload.get("level", "info"),
+                "message": payload.get("message"),
+                "line": line,
+            }
+            event_callback(event_payload)
+
+    return project_log_callback
+
+
 def run_projects(
     config: Dict[str, Any],
     projects: Sequence[str],
@@ -300,7 +336,9 @@ def run_projects(
             target_language = config.get("target_language", "ch")
             project_output_path = str(project_output_dir(output_dir, target_language, project_dir))
             log_path = str(project_log_path(output_dir, target_language, project_dir))
-            print(f"[{idx}/{total_projects}] Processing {project_name}")
+            Path(log_path).parent.mkdir(parents=True, exist_ok=True)
+            if project_context is None:
+                Path(log_path).write_text("", encoding="utf-8")
             if event_callback:
                 event_callback(
                     {
@@ -314,47 +352,73 @@ def run_projects(
                     }
                 )
 
-            try:
-                latex_trans = CoordinatorAgent(
-                    config=config,
-                    project_dir=project_dir,
-                    output_dir=output_dir,
-                )
-                if config.get("retranslate_with_terms", False):
-                    workflow_result = latex_trans.workflow_latextrans_with_existing_terms()
+            with Path(log_path).open("a", encoding="utf-8", buffering=1) as log_file:
+                processing_line = f"[{idx}/{total_projects}] Processing {project_name}"
+                if project_context is not None:
+                    print(processing_line)
                 else:
-                    workflow_result = latex_trans.workflow_latextrans()
-                project_result = classify_project_result(
-                    index=idx,
-                    total=total_projects,
+                    log_file.write(f"{processing_line}\n")
+                project_config = dict(config)
+                project_config["_project_log_callback"] = _build_project_log_callback(
+                    event_callback=event_callback,
+                    log_file=log_file,
                     project_name=project_name,
                     project_dir=project_dir,
-                    workflow_result=workflow_result,
-                    output_dir=project_output_path,
+                    project_output_path=project_output_path,
                     log_path=log_path,
+                    write_file=project_context is None,
                 )
-            except Exception as e:
-                print(f"Error processing project {project_name}: {e}")
-                failure_result = {
-                    "type": "failed",
-                    "ok": False,
-                    "index": idx,
-                    "total": total_projects,
-                    "project_name": project_name,
-                    "project_dir": project_dir,
-                    "output_dir": project_output_path,
-                    "pdf_path": None,
-                    "errors_report_path": None,
-                    "validation_summary": None,
-                    "error": str(e),
-                    "log_path": log_path,
-                }
-                failed_projects.append(failure_result)
-                if event_callback:
-                    event_payload = dict(failure_result)
-                    event_payload["type"] = "project_error"
-                    event_callback(event_payload)
-                continue
+                project_config["_project_log_print_console"] = project_context is not None
+
+                with progress_log_context(
+                    project_config["_project_log_callback"],
+                    emit_console=project_context is not None,
+                ):
+                    try:
+                        latex_trans = CoordinatorAgent(
+                            config=project_config,
+                            project_dir=project_dir,
+                            output_dir=output_dir,
+                        )
+                        if project_config.get("retranslate_with_terms", False):
+                            workflow_result = latex_trans.workflow_latextrans_with_existing_terms()
+                        else:
+                            workflow_result = latex_trans.workflow_latextrans()
+                        project_result = classify_project_result(
+                            index=idx,
+                            total=total_projects,
+                            project_name=project_name,
+                            project_dir=project_dir,
+                            workflow_result=workflow_result,
+                            output_dir=project_output_path,
+                            log_path=log_path,
+                        )
+                    except Exception as e:
+                        error_line = f"Error processing project {project_name}: {e}"
+                        if project_context is not None:
+                            print(error_line)
+                        else:
+                            log_file.write(f"{error_line}\n")
+                        failure_result = {
+                            "type": "failed",
+                            "ok": False,
+                            "index": idx,
+                            "total": total_projects,
+                            "project_name": project_name,
+                            "project_dir": project_dir,
+                            "output_dir": project_output_path,
+                            "pdf_path": None,
+                            "errors_report_path": None,
+                            "validation_summary": None,
+                            "error": str(e),
+                            "log_path": log_path,
+                        }
+                        failed_projects.append(failure_result)
+                        if event_callback:
+                            event_payload = dict(failure_result)
+                            event_payload["type"] = "project_error"
+                            event_callback(event_payload)
+                        continue
 
             if project_result["ok"]:
                 completed_projects.append(project_result)

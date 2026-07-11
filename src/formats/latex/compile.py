@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import Any, Callable, Dict, List
 import re
 import os
 import subprocess
@@ -16,9 +16,31 @@ LATEX_HARD_ERROR_PATTERNS = [
 
 
 class LaTexCompiler:
-    def __init__(self, output_latex_dir: str, target_language: str = "ch"):
+    def __init__(
+        self,
+        output_latex_dir: str,
+        target_language: str = "ch",
+        log_callback: Callable[[Dict[str, Any]], None] | None = None,
+        emit_console: bool = True,
+    ):
         self.output_latex_dir = output_latex_dir
         self.target_language = target_language
+        self.log_callback = log_callback
+        self.emit_console = emit_console
+
+    def _log(self, message: str, level: str = "info") -> None:
+        """将编译状态写入显式日志回调，并按需保留终端输出。"""
+        if self.log_callback is not None:
+            self.log_callback(
+                {
+                    "agent_name": "LaTexCompiler",
+                    "level": level,
+                    "message": message,
+                    "line": message,
+                }
+            )
+        if self.emit_console or self.log_callback is None:
+            print(message)
 
     def compile(self):
         """
@@ -26,13 +48,13 @@ class LaTexCompiler:
         """
         tex_file_to_compile = find_main_tex_file(self.output_latex_dir)
         if not tex_file_to_compile:
-            print("⚠️ Warning: There is no main tex file to compile in this directory.")
+            self._log("⚠️ Warning: There is no main tex file to compile in this directory.", "warning")
             return None
 
         self._remove_success_marker()
         attempted_log_files = []
         for engine in latex_engine_order_for_language(self.target_language):
-            print(f"Start compiling with {engine}...⏳")
+            self._log(f"Start compiling with {engine}...⏳")
             compile_out_dir = os.path.join(self.output_latex_dir, f"build_{engine}")
             os.makedirs(compile_out_dir, exist_ok=True)
             self._prepare_include_output_dirs(tex_file_to_compile, compile_out_dir)
@@ -49,20 +71,20 @@ class LaTexCompiler:
             ]
             hard_error_logs = [log_file for log_file in log_files if self._log_has_hard_errors(log_file)]
             if pdf_files and not hard_error_logs:
-                print("✅  Successfully generated PDF file !")
+                self._log("✅  Successfully generated PDF file !")
                 self._write_success_marker()
                 return pdf_files[0]
 
             if hard_error_logs:
-                print(f"⚠️  LaTeX hard errors found with {engine}: {hard_error_logs}")
+                self._log(f"⚠️  LaTeX hard errors found with {engine}: {hard_error_logs}", "warning")
                 self._remove_success_marker()
-            print(f"⚠️  Failed to generate PDF with {engine}.")
+            self._log(f"⚠️  Failed to generate PDF with {engine}.", "warning")
             attempted_log_files.extend(log_files)
 
         if attempted_log_files:
-            print(f"📄 Log files: {attempted_log_files}")
+            self._log(f"📄 Log files: {attempted_log_files}")
         self._remove_success_marker()
-        print("⚠️  Failed to generate PDF with all configured engines. Please check the log.")
+        self._log("⚠️  Failed to generate PDF with all configured engines. Please check the log.", "warning")
         return None
 
     def _log_has_hard_errors(self, log_file: str) -> bool:
@@ -119,22 +141,22 @@ class LaTexCompiler:
         """
         tex_file_to_compile = find_main_tex_file(self.output_latex_dir)
         if not tex_file_to_compile:
-            print("⚠️ Warning: There is no main tex file to compile in this directory.")
+            self._log("⚠️ Warning: There is no main tex file to compile in this directory.", "warning")
             return None
-        print("Start compiling with lualatex...⏳")
+        self._log("Start compiling with lualatex...⏳")
         compile_out_dir_lualatex = os.path.join(self.output_latex_dir, "build_lualatex")
         self._compile_with_lualatex(tex_file_to_compile, compile_out_dir_lualatex, engine="lualatex")
         pdf_files = [os.path.join(compile_out_dir_lualatex, file) for file in os.listdir(compile_out_dir_lualatex) if file.lower().endswith('.pdf')]
         if pdf_files:
 
-            print(f"✅  Successfully generated PDF file !") 
+            self._log("✅  Successfully generated PDF file !")
             return pdf_files[0]
         else:
-            print(f"⚠️  Failed to generate PDF with xelatex. Please check the log.")
+            self._log("⚠️  Failed to generate PDF with xelatex. Please check the log.", "warning")
             # log_files_xelatex = [os.path.join(compile_out_dir_xelatex, file) for file in os.listdir(compile_out_dir_xelatex) if file.lower().endswith('.log')]
             log_files_lualatex = [os.path.join(compile_out_dir_lualatex, file) for file in os.listdir(compile_out_dir_lualatex) if file.lower().endswith('.log')]
             if log_files_lualatex:
-                print(f"📄 Log files for pdflatex: {log_files_lualatex}")
+                self._log(f"📄 Log files for pdflatex: {log_files_lualatex}")
             return None
 
     def compile_source(self, pdf_dir):
@@ -144,10 +166,10 @@ class LaTexCompiler:
 
         tex_file_to_compile = find_main_tex_file(self.output_latex_dir)
         if not tex_file_to_compile:
-            print("⚠️ Warning: No main .tex file found in directory.")
+            self._log("⚠️ Warning: No main .tex file found in directory.", "warning")
             return None
 
-        print("Start compiling with pdflatex...⏳")
+        self._log("Start compiling with pdflatex...⏳")
         self._compile_with_pdflatex(
             tex_file_to_compile,
             out_dir=pdf_dir,  # Output directly to pdf_dir
@@ -161,11 +183,11 @@ class LaTexCompiler:
 
         if pdf_files:
             pdf_path = os.path.join(pdf_dir, pdf_files[0])
-            print(f"✅ Successfully generated PDF at: {pdf_path}")
+            self._log(f"✅ Successfully generated PDF at: {pdf_path}")
             return pdf_path
 
         # Fallback to xelatex if pdflatex failed
-        print("⚠️ pdflatex failed. Retrying with xelatex...⏳")
+        self._log("⚠️ pdflatex failed. Retrying with xelatex...⏳", "warning")
         self._compile_with_xelatex(
             tex_file_to_compile,
             out_dir=pdf_dir,  # Output directly to pdf_dir
@@ -179,16 +201,16 @@ class LaTexCompiler:
 
         if pdf_files:
             pdf_path = os.path.join(pdf_dir, pdf_files[0])
-            print(f"✅ Successfully generated PDF at: {pdf_path}")
+            self._log(f"✅ Successfully generated PDF at: {pdf_path}")
             return pdf_path
 
         # If both compilers failed
-        print("⚠️ Failed to generate PDF with both compilers.")
+        self._log("⚠️ Failed to generate PDF with both compilers.", "warning")
         log_files = [f for f in os.listdir(pdf_dir) if f.lower().endswith('.log')]
         if log_files:
-            print("📄 Compilation logs:")
+            self._log("📄 Compilation logs:")
             for log in log_files:
-                print(f"  - {os.path.join(pdf_dir, log)}")
+                self._log(f"  - {os.path.join(pdf_dir, log)}")
 
         return None
 
@@ -212,10 +234,10 @@ class LaTexCompiler:
         cwd = os.path.dirname(tex_file)
         try:
             subprocess.run(cmd, check=True, capture_output=True, cwd=cwd)
-            print("✅  Compilation successful!") #compile success!
+            self._log("✅  Compilation successful!") #compile success!
                 
         except subprocess.CalledProcessError as e:
-            print("⚠️  Somthing went wrong during compiling with pdflatex.")
+            self._log("⚠️  Somthing went wrong during compiling with pdflatex.", "warning")
 
     def _compile_with_xelatex(self,
                               tex_file: str, 
@@ -237,9 +259,9 @@ class LaTexCompiler:
         cwd = os.path.dirname(tex_file)
         try:
             subprocess.run(cmd, check=True, capture_output=True, cwd=cwd)
-            print("✅  Compilation successful!") #compile success!
+            self._log("✅  Compilation successful!") #compile success!
         except subprocess.CalledProcessError as e:
-            print("⚠️  Somthing went wrong during compiling with xelatex.")
+            self._log("⚠️  Somthing went wrong during compiling with xelatex.", "warning")
 
 
     def _compile_with_lualatex(self,
@@ -262,7 +284,7 @@ class LaTexCompiler:
         cwd = os.path.dirname(tex_file)
         try:
             subprocess.run(cmd, check=True, capture_output=True, cwd=cwd)
-            print("✅  Compilation successful!") #compile success!
+            self._log("✅  Compilation successful!") #compile success!
                 
         except subprocess.CalledProcessError as e:
-            print(f"⚠️  Somthing went wrong during compiling with lualatex. \n {e}")
+            self._log(f"⚠️  Somthing went wrong during compiling with lualatex. \n {e}", "warning")

@@ -14,15 +14,17 @@ def load_requirements(path: str) -> List[str]:
     return requirements
 
 
-setup(
-    name="LaTeXTrans",
-    version="0.1.0",
-    packages=find_packages(),
-    py_modules=["main"],
-    install_requires=load_requirements("requirements.txt"),
-    entry_points={
-        "console_scripts": [
-            "latextrans=main:main",
-        ],
-    },
-)
+if __name__ == "__main__":
+    setup(
+        name="LaTeXTrans",
+        version="0.1.0",
+        packages=find_packages(),
+        py_modules=["main"],
+        install_requires=load_requirements("requirements.txt"),
+        entry_points={
+            "console_scripts": [
+                "latextrans=main:main",
+                "latextrans-tui=src.tui.app:run",
+            ],
+        },
+    )

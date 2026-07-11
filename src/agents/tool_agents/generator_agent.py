@@ -77,7 +77,7 @@ class GeneratorAgent(BaseToolAgent):
         with _suppress_stderr():
             self.progress_bar.progress(70)
 
-        print(transed_latex_dir)
+        self.log(transed_latex_dir)
 
         with _suppress_stderr():
             self.status_text.text("🔨 Refactoring LaTeX document...")
@@ -99,6 +99,8 @@ class GeneratorAgent(BaseToolAgent):
         latex_compiler = LaTexCompiler(
             output_latex_dir=transed_latex_dir,
             target_language=target_language,
+            log_callback=self.config.get("_project_log_callback"),
+            emit_console=bool(self.config.get("_project_log_print_console", True)),
         )
         pdf_file = latex_compiler.compile()
 

@@ -505,6 +505,55 @@ class CoordinatorMessageTests(unittest.TestCase):
         shutil_mock.move.assert_called_once()
         self.assertTrue(result["ok"])
 
+    def test_workflow_result_keeps_generated_terms_paths_after_translation(self):
+        """术语扫描后继续翻译时，最终结果应保留生成的术语表路径。"""
+        events = []
+
+        parser = Mock()
+        parser.execute.side_effect = lambda: events.append("parser")
+        terminology = Mock()
+        terminology.execute.side_effect = lambda: events.append("terminology") or {
+            "project_terms_path": r"outputs\ch_paper\project_terms.csv",
+            "project_terms_decisions_path": r"outputs\ch_paper\project_terms_decisions.json",
+        }
+        translator = Mock()
+        translator.execute = AsyncMock(side_effect=lambda *args, **kwargs: events.append("translator"))
+        validator = Mock()
+        validator.execute.return_value = []
+        generator = Mock()
+        generator.execute.return_value = r"build\paper.pdf"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project_dir = os.path.join(tmpdir, "paper")
+            output_dir = os.path.join(tmpdir, "outputs")
+            config = {
+                "target_language": "ch",
+                "terminology": {
+                    "enabled": True,
+                    "review_before_translate": False,
+                },
+            }
+            agent = CoordinatorAgent(config=config, project_dir=project_dir, output_dir=output_dir)
+            try:
+                with patch.object(coordinator_agent, "ParserAgent", return_value=parser), \
+                        patch.object(coordinator_agent, "TerminologyAgent", return_value=terminology), \
+                        patch.object(coordinator_agent, "TranslatorAgent", return_value=translator), \
+                        patch.object(coordinator_agent, "ValidatorAgent", return_value=validator), \
+                        patch.object(coordinator_agent, "GeneratorAgent", return_value=generator), \
+                        patch.object(coordinator_agent, "shutil"), \
+                        patch("builtins.print"):
+                    result = agent.workflow_latextrans()
+            finally:
+                if not agent.loop.is_closed():
+                    agent.loop.close()
+
+        self.assertEqual(events, ["parser", "terminology", "translator"])
+        self.assertEqual(result["project_terms_path"], r"outputs\ch_paper\project_terms.csv")
+        self.assertEqual(
+            result["project_terms_decisions_path"],
+            r"outputs\ch_paper\project_terms_decisions.json",
+        )
+
     def test_workflow_uses_should_run_terminology_scan_gate(self):
         events = []
 

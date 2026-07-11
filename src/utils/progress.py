@@ -1,4 +1,45 @@
 import sys
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Callable, Iterator
+
+ProgressLogCallback = Callable[[dict[str, Any]], None]
+_progress_log_callback: ContextVar[ProgressLogCallback | None] = ContextVar(
+    "progress_log_callback",
+    default=None,
+)
+_progress_emit_console: ContextVar[bool] = ContextVar("progress_emit_console", default=True)
+
+
+def _emit_progress_message(message: str, level: str = "info") -> None:
+    """通过当前进度日志上下文输出一条普通状态消息。"""
+    callback = _progress_log_callback.get()
+    if callback is not None:
+        callback(
+            {
+                "agent_name": "Progress",
+                "level": level,
+                "message": message,
+                "line": message,
+            }
+        )
+    if _progress_emit_console.get():
+        print(message)
+
+
+@contextmanager
+def progress_log_context(
+    callback: ProgressLogCallback | None,
+    emit_console: bool = True,
+) -> Iterator[None]:
+    """在当前执行上下文中配置进度输出的日志回调和终端输出策略。"""
+    callback_token = _progress_log_callback.set(callback)
+    emit_console_token = _progress_emit_console.set(emit_console)
+    try:
+        yield
+    finally:
+        _progress_log_callback.reset(callback_token)
+        _progress_emit_console.reset(emit_console_token)
 
 
 class _LinePrinter:
@@ -9,16 +50,28 @@ class _LinePrinter:
     def update(cls, message):
         text = "" if message is None else str(message)
         pad = max(0, cls._last_len - len(text))
-        sys.stdout.write("\r" + text + (" " * pad))
-        sys.stdout.flush()
+        callback = _progress_log_callback.get()
+        if callback is not None and text:
+            callback(
+                {
+                    "agent_name": "Progress",
+                    "level": "info",
+                    "message": text,
+                    "line": text,
+                }
+            )
+        if _progress_emit_console.get():
+            sys.stdout.write("\r" + text + (" " * pad))
+            sys.stdout.flush()
         cls._last_len = len(text)
         cls._active = True
 
     @classmethod
     def finish(cls):
         if cls._active:
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+            if _progress_emit_console.get():
+                sys.stdout.write("\n")
+                sys.stdout.flush()
         cls._last_len = 0
         cls._active = False
 
@@ -59,11 +112,11 @@ class _Status:
 
     def success(self, message):
         _LinePrinter.finish()
-        print(message)
+        _emit_progress_message(message)
 
     def error(self, message):
         _LinePrinter.finish()
-        print(message)
+        _emit_progress_message(message, "error")
 
     def progress(self, value=0, text=None):
         bar = _ProgressBar(value=value)
@@ -91,12 +144,12 @@ class _CliProgress:
     @staticmethod
     def success(message):
         _LinePrinter.finish()
-        print(message)
+        _emit_progress_message(message)
 
     @staticmethod
     def error(message):
         _LinePrinter.finish()
-        print(message)
+        _emit_progress_message(message, "error")
 
 
 _backend = _CliProgress()

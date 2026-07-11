@@ -38,16 +38,30 @@ class BaseToolAgent(ABC):
             message (str): The message to log.
             level (str): The logging level. Defaults to "info".
         """
-        if level == "info":
-            print(f"[{self.agent_name}] [INFO] {message}")
-        elif level == "debug":
-            print(f"[{self.agent_name}] [DEBUG] {message}")
-        elif level == "warning":
-            print(f"[{self.agent_name}] [WARNING] {message}")
-        elif level == "error":
-            print(f"[{self.agent_name}] [ERROR] {message}")
-        else:
+        level_labels = {
+            "info": "INFO",
+            "debug": "DEBUG",
+            "warning": "WARNING",
+            "error": "ERROR",
+        }
+        if level not in level_labels:
             raise ValueError(f"Unknown log level: {level}")
+
+        line = f"[{self.agent_name}] [{level_labels[level]}] {message}"
+        log_callback = self.config.get("_project_log_callback")
+        if callable(log_callback):
+            log_callback(
+                {
+                    "agent_name": self.agent_name,
+                    "level": level,
+                    "message": message,
+                    "line": line,
+                }
+            )
+            if self.config.get("_project_log_print_console"):
+                print(line)
+            return
+        print(line)
 
     @abstractmethod
     def execute(self, data: Any, **kwargs: Any) -> Any:

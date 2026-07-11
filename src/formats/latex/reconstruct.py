@@ -135,6 +135,8 @@ class LatexConstructor:
         tex = add_language_support_package(tex, self.target_language)
 
         main_file_path = find_main_tex_file(self.output_latex_dir)
+        if main_file_path is None:
+            raise FileNotFoundError(f"No main TeX file found in {self.output_latex_dir}.")
         if os.path.exists(main_file_path):
             with open(main_file_path, "w", encoding="utf-8") as f:
                 f.write(tex)
