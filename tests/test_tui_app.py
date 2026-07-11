@@ -286,6 +286,40 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_ENTRY)
             start_current_task.assert_called_once_with()
 
+    async def test_enter_submits_entry_form_while_batch_input_is_focused(self):
+        """确认入口页文本框聚焦时按 Enter 会发送任务。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            app.query_one("#input-type-select", Select).value = "arxiv"
+            batch_input = app.query_one("#batch-input", TextArea)
+            batch_input.text = "2508.18791"
+            batch_input.focus()
+
+            with patch.object(app, "start_current_task") as start_current_task:
+                with patch.object(app, "notify"):
+                    await pilot.press("enter")
+                    await pilot.pause()
+
+            self.assertIsInstance(app.current_task, TaskViewState)
+            self.assertEqual(app.current_task.inputs, ["2508.18791"])
+            start_current_task.assert_called_once_with()
+
+    async def test_entry_page_footer_does_not_show_tab_shortcuts(self):
+        """确认入口页不会把设置页和详情页快捷键显示成全局 Footer 提示。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            active_shortcuts = set(app.active_bindings)
+
+            self.assertNotIn("c", active_shortcuts)
+            self.assertNotIn("p", active_shortcuts)
+            self.assertNotIn("t", active_shortcuts)
+            self.assertNotIn("r", active_shortcuts)
+            self.assertNotIn("e", active_shortcuts)
+            self.assertNotIn("l", active_shortcuts)
+            self.assertNotIn("z", active_shortcuts)
+
     async def test_submit_entry_form_notifies_with_timestamp_task_id(self):
         """确认任务开始通知包含新建任务 id。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)
@@ -613,6 +647,38 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
                 app.query_one("#save-config-button")
             with self.assertRaises(NoMatches):
                 app.query_one("#reload-config-button")
+
+    async def test_config_page_shortcuts_switch_config_and_preview_tabs(self):
+        """确认设置页 c/p 快捷键会切换配置和预览 tab。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            app.switch_page(PAGE_CONFIG)
+            tabs = app.query_one("#config-tabs", TabbedContent)
+            app.query_one("#config-tabs ContentTabs").focus()
+
+            await pilot.press("p")
+            await pilot.pause()
+            self.assertEqual(tabs.active, "config-preview-tab")
+
+            await pilot.press("c")
+            await pilot.pause()
+            self.assertEqual(tabs.active, "config-form-tab")
+
+    async def test_config_tab_shortcuts_show_only_when_config_tabs_are_focused(self):
+        """确认设置页快捷键只在设置 tab 组件上下文中显示。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            app.switch_page(PAGE_CONFIG)
+            await pilot.pause()
+            self.assertNotIn("p", set(app.active_bindings))
+
+            app.query_one("#config-tabs ContentTabs").focus()
+            await pilot.pause()
+
+            active_shortcuts = set(app.active_bindings)
+            self.assertIn("c", active_shortcuts)
+            self.assertIn("p", active_shortcuts)
+            self.assertNotIn("t", active_shortcuts)
 
     async def test_config_field_change_persists_immediately_and_refreshes_preview(self):
         """确认配置字段变化后会即时保存 UI 配置并刷新 TOML 预览。"""
@@ -1371,6 +1437,43 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
 
                 wide_source_width = errors_table.ordered_columns[4].width
                 self.assertGreater(wide_source_width, narrow_source_width)
+
+    async def test_detail_page_shortcuts_switch_detail_tabs(self):
+        """确认详情页 t/r/e/l/z 快捷键会切换对应项目 tab。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            app.switch_page(PAGE_DETAIL)
+            tabs = app.query_one("#detail-tabs", TabbedContent)
+            app.query_one("#detail-tabs ContentTabs").focus()
+
+            shortcut_tabs = [
+                ("r", "terms-tab"),
+                ("e", "errors-tab"),
+                ("l", "log-tab"),
+                ("z", "zotero-tab"),
+                ("t", "tex-tab"),
+            ]
+            for key, tab_id in shortcut_tabs:
+                await pilot.press(key)
+                await pilot.pause()
+                self.assertEqual(tabs.active, tab_id)
+
+    async def test_detail_tab_shortcuts_show_only_when_detail_tabs_are_focused(self):
+        """确认详情页快捷键只在详情 tab 组件上下文中显示。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            app.switch_page(PAGE_DETAIL)
+            await pilot.pause()
+            self.assertNotIn("r", set(app.active_bindings))
+
+            app.query_one("#detail-tabs ContentTabs").focus()
+            await pilot.pause()
+
+            active_shortcuts = set(app.active_bindings)
+            self.assertIn("t", active_shortcuts)
+            self.assertIn("r", active_shortcuts)
+            self.assertIn("z", active_shortcuts)
+            self.assertNotIn("p", active_shortcuts)
 
     async def test_refresh_detail_page_populates_terms_table(self):
         """确认详情页术语表只渲染 CSV 中的术语行。"""

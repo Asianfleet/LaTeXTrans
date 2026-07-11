@@ -15,6 +15,7 @@ from rich.text import Text
 from rich.syntax import Syntax
 from textual import events, work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.coordinate import Coordinate
 from textual.css.query import NoMatches
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -259,6 +260,50 @@ class ZoteroResultsTable(DataTable):
         return int(event.screen_y - self.region.y) - self.header_height
 
 
+class EntryBatchTextArea(TextArea):
+    """入口页批量输入框，负责把 Enter 解释为提交任务。"""
+
+    BINDINGS = [
+        *TextArea.BINDINGS,
+        Binding("enter", "submit_entry", "发送", priority=True),
+    ]
+
+    def action_submit_entry(self) -> None:
+        """提交入口页表单，不在输入框中插入换行。"""
+        app = self.app
+        if hasattr(app, "submit_entry_form"):
+            app.submit_entry_form()
+
+
+class ConfigTabbedContent(TabbedContent):
+    """设置页 tab 容器，提供只在设置上下文显示的 tab 快捷键。"""
+
+    BINDINGS = [
+        Binding("c", "show_tab('config-form-tab')", "配置"),
+        Binding("p", "show_tab('config-preview-tab')", "预览"),
+    ]
+
+    def action_show_tab(self, tab_id: str) -> None:
+        """切换到指定设置 tab。"""
+        self.active = tab_id
+
+
+class DetailTabbedContent(TabbedContent):
+    """项目详情 tab 容器，提供只在详情上下文显示的 tab 快捷键。"""
+
+    BINDINGS = [
+        Binding("t", "show_tab('tex-tab')", "TeX"),
+        Binding("r", "show_tab('terms-tab')", "术语"),
+        Binding("e", "show_tab('errors-tab')", "错误"),
+        Binding("l", "show_tab('log-tab')", "日志"),
+        Binding("z", "show_tab('zotero-tab')", "Zotero"),
+    ]
+
+    def action_show_tab(self, tab_id: str) -> None:
+        """切换到指定项目详情 tab。"""
+        self.active = tab_id
+
+
 class LaTeXTransTuiApp(App[None]):
     """Main Textual application for LaTeXTransPlus."""
 
@@ -492,13 +537,13 @@ class LaTeXTransTuiApp(App[None]):
                                 id="input-type-select",
                                 value="arxiv",
                             )
-                            yield TextArea(id="batch-input")
+                            yield EntryBatchTextArea(id="batch-input")
                             yield Button("发送", id="start-task-button", flat=True)
                         yield Static("", id="entry-error")
                         yield Static("", id="entry-bottom-offset")
                         yield Static("", id="entry-bottom-spacer")
                 with Vertical(id=PAGE_DETAIL):
-                    with TabbedContent(initial="tex-tab", id="detail-tabs"):
+                    with DetailTabbedContent(initial="tex-tab", id="detail-tabs"):
                         with TabPane("TeX", id="tex-tab"):
                             with VerticalScroll(id="tex-preview-scroll"):
                                 yield Static("", id="tex-preview")
@@ -520,7 +565,7 @@ class LaTeXTransTuiApp(App[None]):
                 with Vertical(id=PAGE_TASKS):
                     yield DataTable(id="task-table")
                 with Vertical(id=PAGE_CONFIG):
-                    with TabbedContent(initial="config-form-tab", id="config-tabs"):
+                    with ConfigTabbedContent(initial="config-form-tab", id="config-tabs"):
                         with TabPane("配置", id="config-form-tab"):
                             with VerticalScroll(id="config-form"):
                                 for section, fields in grouped_config_fields():
