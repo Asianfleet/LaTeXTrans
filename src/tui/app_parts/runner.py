@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from datetime import datetime
 
 from textual import work
@@ -17,6 +16,11 @@ from src.tui.state import TaskViewState
 
 class RunnerMixin:
     """Create TUI tasks from entry input and run them in a Textual worker."""
+
+    task_timestamp_factory = staticmethod(
+        lambda: datetime.now().strftime("%Y%m%dT%H%M%S.%f")[:-3]
+    )
+    task_runner = staticmethod(run_tui_task)
 
     def submit_entry_form(self) -> None:
         """校验入口页表单并创建任务视图状态。"""
@@ -46,9 +50,7 @@ class RunnerMixin:
 
     def _next_task_id(self) -> str:
         """Return the next stable task identifier for a submitted UI task."""
-        app_module = sys.modules.get("src.tui.app")
-        datetime_type = getattr(app_module, "datetime", datetime)
-        return datetime_type.now().strftime("%Y%m%dT%H%M%S.%f")[:-3]
+        return self.task_timestamp_factory()
 
     def start_current_task(self) -> None:
         """通过 Textual worker 启动当前任务。"""
@@ -69,9 +71,7 @@ class RunnerMixin:
             self.call_from_thread(self.handle_runtime_event, event, task)
 
         try:
-            app_module = sys.modules.get("src.tui.app")
-            runner = getattr(app_module, "run_tui_task", run_tui_task)
-            runner(
+            self.task_runner(
                 config_path=str(UI_CONFIG_PATH),
                 input_type=task.input_type,
                 items=task.inputs,

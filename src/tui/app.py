@@ -55,6 +55,29 @@ def _save_ui_config_for_app(project_root: Path, config: dict[str, object]) -> No
     save_ui_config(project_root, config)
 
 
+def _next_task_timestamp_for_app() -> str:
+    """Build the next task timestamp through the module-level datetime hook."""
+    return datetime.now().strftime("%Y%m%dT%H%M%S.%f")[:-3]
+
+
+def _run_tui_task_for_app(
+    *,
+    config_path: str,
+    input_type: str,
+    items: list[str],
+    overrides: dict[str, object],
+    event_callback,
+) -> None:
+    """Run a UI task through the module-level runner hook used by app tests."""
+    run_tui_task(
+        config_path=config_path,
+        input_type=input_type,
+        items=items,
+        overrides=overrides,
+        event_callback=event_callback,
+    )
+
+
 class LaTeXTransTuiApp(
     LayoutMixin,
     NavigationMixin,
@@ -76,6 +99,8 @@ class LaTeXTransTuiApp(
     selected_task_id: str | None = None
     config_loader = staticmethod(_load_ui_config_for_app)
     config_saver = staticmethod(_save_ui_config_for_app)
+    task_timestamp_factory = staticmethod(_next_task_timestamp_for_app)
+    task_runner = staticmethod(_run_tui_task_for_app)
     zotero_adapter_factory = staticmethod(
         lambda api_key, local_api_base: ZoteroAdapter(
             api_key=api_key,
