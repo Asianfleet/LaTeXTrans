@@ -59,6 +59,7 @@ The package currently installs the console command:
 
 ```bash
 latextrans
+latextrans-tui
 ```
 
 ## 2. Install a LaTeX Distribution
@@ -75,6 +76,41 @@ LaTeXTransPlus compiles translated projects with `latexmk` and may use `pdflatex
 conda create -n latextrans python=3.10 -y
 conda activate latextrans
 pip install -e .
+```
+
+To run the commands later without manually activating `latextrans`, use the Windows wrapper scripts included in this repository:
+
+```text
+scripts\windows\latextrans.cmd
+scripts\windows\latextrans-tui.cmd
+```
+
+The wrappers call the programs installed in the `latextrans` environment through `conda run -n latextrans`. Install the project into that environment first:
+
+```powershell
+conda run -n latextrans python -m pip install -e D:\Workspace\tools\LaTeXTransPlus
+```
+
+Then add `scripts\windows` to your user `PATH`, or copy the two `.cmd` files to an existing PATH directory. After opening a new terminal, these commands can be run directly:
+
+```powershell
+latextrans --arxiv 2508.18791
+latextrans-tui
+```
+
+The wrappers require the `conda` command to be available in the terminal. If conda is not on PATH, use Anaconda Prompt, Miniconda Prompt, or initialize conda for the current shell first.
+
+On Linux, the repository also includes shell wrappers:
+
+```text
+scripts/linux/latextrans
+scripts/linux/latextrans-tui
+```
+
+They use the same `conda run -n latextrans` pattern. Install the project into that environment first, then add `scripts/linux` to your `PATH` or place the scripts in another PATH directory. Make them executable before use:
+
+```bash
+chmod +x scripts/linux/latextrans scripts/linux/latextrans-tui
 ```
 
 # ⚙️ Configuration

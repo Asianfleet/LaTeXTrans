@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec conda run -n latextrans latextrans "$@"

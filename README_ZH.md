@@ -59,6 +59,7 @@ pip install -e .
 
 ```bash
 latextrans
+latextrans-tui
 ```
 
 ## 2. 安装 LaTeX 发行版
@@ -75,6 +76,41 @@ LaTeXTransPlus 使用 `latexmk` 编译译文项目，并会根据目标语言选
 conda create -n latextrans python=3.10 -y
 conda activate latextrans
 pip install -e .
+```
+
+如果希望之后无需手动 `conda activate latextrans`，可以使用仓库内的 Windows 包装脚本：
+
+```text
+scripts\windows\latextrans.cmd
+scripts\windows\latextrans-tui.cmd
+```
+
+这两个脚本会通过 `conda run -n latextrans` 调用已安装在 `latextrans` 环境中的程序。使用前请先在该环境中安装项目：
+
+```powershell
+conda run -n latextrans python -m pip install -e D:\Workspace\tools\LaTeXTransPlus
+```
+
+之后可以把 `scripts\windows` 目录加入用户 `PATH`，或把这两个 `.cmd` 复制到已有的 PATH 目录。新开终端后即可直接运行：
+
+```powershell
+latextrans --arxiv 2508.18791
+latextrans-tui
+```
+
+脚本依赖终端中能够找到 `conda` 命令；如果系统 PATH 中没有 conda，请在 Anaconda Prompt、Miniconda Prompt 中使用，或先把 conda 初始化到当前 shell。
+
+Linux 下也提供了 shell 包装脚本：
+
+```text
+scripts/linux/latextrans
+scripts/linux/latextrans-tui
+```
+
+它们使用相同的 `conda run -n latextrans` 方式。先把项目安装到该环境，再把 `scripts/linux` 加入 `PATH`，或将脚本放到其他已在 `PATH` 中的目录。使用前记得赋予可执行权限：
+
+```bash
+chmod +x scripts/linux/latextrans scripts/linux/latextrans-tui
 ```
 
 # ⚙️ 配置
