@@ -490,6 +490,7 @@ class LaTeXTransTuiApp(App[None]):
                                     ("远程压缩包 URL", "remote"),
                                 ],
                                 id="input-type-select",
+                                value="arxiv",
                             )
                             yield TextArea(id="batch-input")
                             yield Button("发送", id="start-task-button", flat=True)
