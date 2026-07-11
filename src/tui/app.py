@@ -75,6 +75,16 @@ from src.tui.state import ProjectStatus, ProjectViewState, TaskViewState
 from src.tui.zotero_adapter import ZoteroAdapter
 
 
+def _load_ui_config_for_app(project_root: Path) -> dict[str, object]:
+    """Load UI config through the module-level hook used by app tests."""
+    return load_ui_config(project_root)
+
+
+def _save_ui_config_for_app(project_root: Path, config: dict[str, object]) -> None:
+    """Save UI config through the module-level hook used by app tests."""
+    save_ui_config(project_root, config)
+
+
 class LaTeXTransTuiApp(LayoutMixin, ConfigPageMixin, App[None]):
     """Main Textual application for LaTeXTransPlus."""
 
@@ -84,6 +94,8 @@ class LaTeXTransTuiApp(LayoutMixin, ConfigPageMixin, App[None]):
     tasks: list[TaskViewState]
     selected_project_name: str | None = None
     selected_task_id: str | None = None
+    config_loader = staticmethod(_load_ui_config_for_app)
+    config_saver = staticmethod(_save_ui_config_for_app)
     zotero_adapter_factory = staticmethod(
         lambda api_key, local_api_base: ZoteroAdapter(
             api_key=api_key,

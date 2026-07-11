@@ -1,15 +1,12 @@
 """Configuration page behavior for the Textual TUI app."""
 
 from __future__ import annotations
-
-import sys
 from pathlib import Path
 
 import toml
 from textual.css.query import NoMatches
 from textual.widgets import Input, Select, Static, Switch, TextArea
 
-from src.tui.config import load_ui_config, save_ui_config
 from src.tui.config_schema import (
     CONFIG_FIELDS,
     bool_for_field,
@@ -26,7 +23,7 @@ class ConfigPageMixin:
 
     def load_config_page(self) -> None:
         """将 UI 配置加载到结构化表单和 TOML 预览区。"""
-        config = self._load_ui_config()(Path.cwd())
+        config = self.config_loader(Path.cwd())
         self.current_config = dict(config)
         self.loading_config_form = True
         try:
@@ -47,24 +44,10 @@ class ConfigPageMixin:
         except ValueError as exc:
             self.query_one("#config-error", Static).update(str(exc))
             return
-        self._save_ui_config()(Path.cwd(), config)
+        self.config_saver(Path.cwd(), config)
         self.current_config = dict(config)
         self._update_config_preview(config)
         self.query_one("#config-error", Static).update("")
-
-    def _load_ui_config(self):
-        """返回配置加载函数，优先复用 app 模块上的可 patch 入口。"""
-        app_module = sys.modules.get("src.tui.app")
-        if app_module is not None and hasattr(app_module, "load_ui_config"):
-            return app_module.load_ui_config
-        return load_ui_config
-
-    def _save_ui_config(self):
-        """返回配置保存函数，优先复用 app 模块上的可 patch 入口。"""
-        app_module = sys.modules.get("src.tui.app")
-        if app_module is not None and hasattr(app_module, "save_ui_config"):
-            return app_module.save_ui_config
-        return save_ui_config
 
     def _is_config_widget(self, widget_id: str | None) -> bool:
         """判断事件来源是否为设置页配置控件。"""
