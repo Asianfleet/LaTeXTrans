@@ -147,6 +147,41 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(NoMatches):
                 app.query_one("#open-output-button")
 
+    async def test_zotero_controls_match_select_row_height(self):
+        """确认 Zotero 操作栏控件使用和入口页相同的三行高样式。"""
+        app = LaTeXTransTuiApp(load_history_on_mount=False)
+        async with app.run_test() as pilot:
+            app.switch_page(PAGE_DETAIL)
+            app.query_one("#detail-tabs", TabbedContent).active = "zotero-tab"
+            await pilot.pause()
+
+            zotero_controls = app.query_one("#zotero-controls")
+            library_select = app.query_one("#zotero-library-select", Select)
+            search_input = app.query_one("#zotero-search-input", Input)
+            search_button = app.query_one("#zotero-search-button", Button)
+            auto_match_button = app.query_one("#zotero-auto-match-button", Button)
+            import_button = app.query_one("#import-zotero-button", Button)
+
+            self.assertEqual(zotero_controls.region.height, library_select.region.height)
+            self.assertEqual(library_select.region.height, 3)
+            self.assertEqual(search_input.region.y, library_select.region.y)
+            self.assertEqual(search_button.region.y, library_select.region.y)
+            self.assertEqual(auto_match_button.region.y, library_select.region.y)
+            self.assertEqual(import_button.region.y, library_select.region.y)
+            self.assertEqual(search_input.region.height, library_select.region.height)
+            self.assertEqual(search_button.region.height, library_select.region.height)
+            self.assertEqual(auto_match_button.region.height, library_select.region.height)
+            self.assertEqual(import_button.region.height, library_select.region.height)
+            self.assertLess(search_button.region.width, auto_match_button.region.width)
+            self.assertLess(import_button.region.width, auto_match_button.region.width)
+            self.assertTrue(search_button.flat)
+            self.assertTrue(auto_match_button.flat)
+            self.assertTrue(import_button.flat)
+            self.assertEqual(search_button.styles.border.top[0], search_input.styles.border.top[0])
+            self.assertEqual(auto_match_button.styles.border.top[0], search_input.styles.border.top[0])
+            self.assertEqual(import_button.styles.border.top[0], search_input.styles.border.top[0])
+            self.assertEqual(search_button.styles.border.top[0], "tall")
+
     async def test_switch_page_updates_content_switcher(self):
         """确认 switch_page 会更新主内容切换器当前页面。"""
         app = LaTeXTransTuiApp(load_history_on_mount=False)

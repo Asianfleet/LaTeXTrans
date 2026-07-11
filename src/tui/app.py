@@ -454,31 +454,55 @@ class LaTeXTransTuiApp(App[None]):
     }
 
     #zotero-controls {
-          width: 100%;
-          height: 3;
-      }
+        width: 100%;
+        height: 3;
+        margin-bottom: 1;
+    }
 
-      #zotero-library-select {
-          width: 16;
-      }
+    #zotero-library-select {
+        width: 16;
+        height: 3;
+    }
 
-      #zotero-search-input {
-          width: 1fr;
-      }
+    #zotero-search-input {
+        width: 1fr;
+        min-width: 24;
+        height: 3;
+    }
 
-      #zotero-search-button,
-      #zotero-auto-match-button,
-      #import-zotero-button {
-          width: 4;
-      }
+    #zotero-search-button,
+    #import-zotero-button {
+        width: 8;
+        min-width: 8;
+        height: 3;
+        border: tall $border-blurred;
+    }
 
-      #zotero-import-rule {
-          height: 3;
-      }
+    #zotero-auto-match-button {
+        width: 14;
+        min-width: 14;
+        height: 3;
+        border: tall $border-blurred;
+    }
 
-      #zotero-results {
-          height: 1fr;
-      }
+    #zotero-search-button:hover,
+    #zotero-search-button:focus,
+    #zotero-auto-match-button:hover,
+    #zotero-auto-match-button:focus,
+    #import-zotero-button:hover,
+    #import-zotero-button:focus {
+        border: tall $border;
+    }
+
+    #zotero-import-rule {
+        width: 1;
+        height: 3;
+        margin: 0 1;
+    }
+
+    #zotero-results {
+        height: 1fr;
+    }
     """
 
     current_task: TaskViewState | None = None
