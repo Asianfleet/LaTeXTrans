@@ -1,0 +1,206 @@
+"""CSS used by the Textual TUI app."""
+
+from __future__ import annotations
+
+DEFAULT_CSS = """
+
+    #sidebar {
+        width: 1fr;
+        padding: 0 1 0 1;
+    }
+
+    #sidebar Button {
+        width: 100%;
+        height: auto;
+    }
+
+    #project-list {
+        background: transparent;
+        padding: 0;
+        scrollbar-size: 1 1;
+    }
+
+    #sidebar-rule {
+        margin: 0;
+        padding: 0;
+    }
+
+    #project-list ListItem:hover {
+        background: $surface;
+    }
+
+    .running-task-project {
+        color: orange;
+    }
+
+    #main-switcher {
+        width: 4fr;
+    }
+
+    #config,
+    #tasks,
+    #detail {
+        padding-top: 1;
+    }
+
+    #tex-preview-scroll {
+        height: 1fr;
+    }
+
+    #tex-preview {
+        width: 100%;
+    }
+
+    #log-tab,
+    #project-log {
+        height: 1fr;
+    }
+
+    #terms-table,
+    #errors-table {
+        height: 1fr;
+    }
+
+    #entry {
+        align: center top;
+        padding-top: 0;
+    }
+
+    #entry-form {
+        width: 100%;
+        min-width: 50;
+        max-width: 124;
+        height: 100%;
+        align-horizontal: center;
+    }
+
+    #entry-top-spacer,
+    #entry-bottom-spacer {
+        height: 1fr;
+    }
+
+    #entry-bottom-offset {
+        height: 6;
+    }
+
+    #app-title {
+        width: 100%;
+        height: 6;
+        content-align: center middle;
+        text-style: bold;
+        margin: 0 0 2 0;
+    }
+
+    #batch-input {
+        width: 1fr;
+        height: 3;
+        margin: 0;
+    }
+
+    #entry-actions {
+        width: 100%;
+        height: 3;
+        padding: 0 4;
+    }
+
+    #input-type-select {
+        width: 22;
+    }
+
+    #start-task-button {
+        width: 10;
+        min-width: 10;
+        height: 3;
+        border: tall $border-blurred;
+    }
+
+    #start-task-button:hover,
+    #start-task-button:focus {
+        border: tall $border;
+    }
+
+    #entry-error {
+        width: 100%;
+        margin: 1 0 0 0;
+    }
+
+    #config-form {
+        padding: 1 2;
+    }
+
+    .config-section-title {
+        text-style: bold;
+        margin: 1 0 0 0;
+    }
+
+    .config-field-row {
+        height: auto;
+        margin: 0 0 1 0;
+    }
+
+    .config-field-label {
+        width: 24;
+        padding: 1 1 0 0;
+    }
+
+    .config-field-row Input,
+    .config-field-row Select {
+        width: 1fr;
+    }
+
+    .config-field-row TextArea {
+        width: 1fr;
+        height: 5;
+    }
+
+    #zotero-controls {
+        width: 100%;
+        height: 3;
+        margin-bottom: 1;
+    }
+
+    #zotero-library-select {
+        width: 16;
+        height: 3;
+    }
+
+    #zotero-search-input {
+        width: 1fr;
+        min-width: 24;
+        height: 3;
+    }
+
+    #zotero-search-button,
+    #import-zotero-button {
+        width: 8;
+        min-width: 8;
+        height: 3;
+        border: tall $border-blurred;
+    }
+
+    #zotero-auto-match-button {
+        width: 14;
+        min-width: 14;
+        height: 3;
+        border: tall $border-blurred;
+    }
+
+    #zotero-search-button:hover,
+    #zotero-search-button:focus,
+    #zotero-auto-match-button:hover,
+    #zotero-auto-match-button:focus,
+    #import-zotero-button:hover,
+    #import-zotero-button:focus {
+        border: tall $border;
+    }
+
+    #zotero-import-rule {
+        width: 1;
+        height: 3;
+        margin: 0 1;
+    }
+
+    #zotero-results {
+        height: 1fr;
+    }
+    """
