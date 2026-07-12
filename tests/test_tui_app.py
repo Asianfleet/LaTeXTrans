@@ -314,7 +314,8 @@ class TuiEntryPageTests(RealUiConfigProtectionMixin, unittest.IsolatedAsyncioTes
         app = LaTeXTransTuiApp(load_history_on_mount=False)
         async with app.run_test():
             app.query_one("#input-type-select", Select).value = "arxiv"
-            app.query_one("#batch-input", TextArea).text = "2508.18791\n2407.01648"
+            batch_input = app.query_one("#batch-input", TextArea)
+            batch_input.text = "2508.18791\n2407.01648"
 
             with patch.object(app, "start_current_task") as start_current_task:
                 with patch.object(app, "notify") as notify:
@@ -322,6 +323,7 @@ class TuiEntryPageTests(RealUiConfigProtectionMixin, unittest.IsolatedAsyncioTes
 
             self.assertIsInstance(app.current_task, TaskViewState)
             self.assertEqual(app.current_task.inputs, ["2508.18791", "2407.01648"])
+            self.assertEqual(batch_input.text, "")
             self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_ENTRY)
             self.assertIn(app.current_task.task_id, notify.call_args.args[0])
             start_current_task.assert_called_once_with()
