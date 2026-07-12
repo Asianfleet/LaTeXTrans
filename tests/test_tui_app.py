@@ -36,9 +36,10 @@ from src.tui.app import (
 )
 from src.tui.history import TUI_PROJECT_METADATA_FILENAME
 from src.tui.state import ProjectStatus, ProjectViewState, TaskViewState
+from tests.ui_config_guard import RealUiConfigProtectionMixin, temporary_cwd
 
 
-class TuiPackagingTests(unittest.TestCase):
+class TuiPackagingTests(RealUiConfigProtectionMixin, unittest.TestCase):
     """验证 Textual TUI 的打包依赖和入口。"""
 
     def test_textual_dependency_is_declared(self):
@@ -53,7 +54,7 @@ class TuiPackagingTests(unittest.TestCase):
         self.assertTrue(callable(run))
 
 
-class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
+class TuiLayoutTests(RealUiConfigProtectionMixin, unittest.IsolatedAsyncioTestCase):
     """验证 Textual TUI 首版主布局和页面切换行为。"""
 
     async def test_app_composes_sidebar_switcher_and_footer(self):
@@ -225,7 +226,7 @@ class TuiLayoutTests(unittest.IsolatedAsyncioTestCase):
                 app.query_one("#event-log")
 
 
-class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
+class TuiEntryPageTests(RealUiConfigProtectionMixin, unittest.IsolatedAsyncioTestCase):
     """验证入口页提交会创建任务状态并展示校验错误。"""
 
     async def test_entry_page_uses_centered_initial_form_layout(self):
@@ -416,7 +417,7 @@ class TuiEntryPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.query_one("#main-switcher", ContentSwitcher).current, PAGE_ENTRY)
 
 
-class TuiTaskProjectSemanticsTests(unittest.IsolatedAsyncioTestCase):
+class TuiTaskProjectSemanticsTests(RealUiConfigProtectionMixin, unittest.IsolatedAsyncioTestCase):
     """验证任务历史和项目列表遵循一次提交一个任务的语义。"""
 
     async def test_sequential_single_id_tasks_keep_both_projects_in_sidebar(self):
@@ -618,7 +619,7 @@ class TuiTaskProjectSemanticsTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((output_dir / TUI_PROJECT_METADATA_FILENAME).is_file())
 
 
-class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
+class TuiConfigPageTests(RealUiConfigProtectionMixin, unittest.IsolatedAsyncioTestCase):
     """验证配置页会加载、编辑并保存 UI 配置。"""
 
     async def test_settings_button_loads_structured_config_tabs(self):
@@ -718,6 +719,26 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("c")
             await pilot.pause()
             self.assertEqual(tabs.active, "config-form-tab")
+
+    async def test_config_preview_shortcut_does_not_modify_real_ui_config(self):
+        """确认配置页快捷键测试不会污染真实 UI 配置文件。"""
+        with TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            ui_config_path = project_root / "config" / "ui.toml"
+            ui_config_path.parent.mkdir()
+            ui_config_path.write_text('target_language = "sentinel"\n', encoding="utf-8")
+            original_content = ui_config_path.read_text(encoding="utf-8")
+
+            with temporary_cwd(project_root):
+                app = LaTeXTransTuiApp(load_history_on_mount=False)
+                async with app.run_test() as pilot:
+                    app.switch_page(PAGE_CONFIG)
+                    app.query_one("#config-tabs ContentTabs").focus()
+
+                    await pilot.press("p")
+                    await pilot.pause()
+
+            self.assertEqual(ui_config_path.read_text(encoding="utf-8"), original_content)
 
     async def test_config_tab_shortcuts_show_only_when_config_tabs_are_focused(self):
         """确认设置页快捷键只在设置 tab 组件上下文中显示。"""
@@ -863,7 +884,7 @@ class TuiConfigPageTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("非负整数", str(app.query_one("#config-error", Static).content))
 
 
-class TuiTaskEventTests(unittest.IsolatedAsyncioTestCase):
+class TuiTaskEventTests(RealUiConfigProtectionMixin, unittest.IsolatedAsyncioTestCase):
     """验证任务 runtime 事件会刷新状态并触发通知。"""
 
     async def test_handle_runtime_event_updates_task_and_log(self):
@@ -1148,7 +1169,7 @@ class TuiTaskEventTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("任务全部完成：task-1", messages)
 
 
-class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
+class TuiResultViewsTests(RealUiConfigProtectionMixin, unittest.IsolatedAsyncioTestCase):
     """验证任务结果列表、表格和项目详情页会读取项目状态。"""
 
     async def test_select_project_updates_detail_page(self):
@@ -1625,7 +1646,7 @@ class TuiResultViewsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(terms_table.get_cell_at((0, 1)), "图")
 
 
-class TuiZoteroImportTests(unittest.IsolatedAsyncioTestCase):
+class TuiZoteroImportTests(RealUiConfigProtectionMixin, unittest.IsolatedAsyncioTestCase):
     """验证 Zotero tab 能对选中项目的 PDF 调用 adapter 并反馈状态。"""
 
     async def test_refresh_detail_page_hides_import_controls_without_pdf(self):

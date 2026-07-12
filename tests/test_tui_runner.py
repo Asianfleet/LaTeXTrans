@@ -1,15 +1,15 @@
 """Tests for the TUI runtime runner bridge."""
 
-import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from src.tui.runner import run_tui_task
+from tests.ui_config_guard import RealUiConfigProtectionMixin, temporary_cwd
 
 
-class TuiRunnerTests(unittest.TestCase):
+class TuiRunnerTests(RealUiConfigProtectionMixin, unittest.TestCase):
     """Verify that TUI tasks are routed into the shared runtime workflow."""
 
     def test_run_tui_task_passes_arxiv_inputs_as_paper_list(self):
@@ -62,10 +62,7 @@ class TuiRunnerTests(unittest.TestCase):
             config_dir.mkdir()
             (config_dir / "default.toml").write_text('target_language = "ch"\n', encoding="utf-8")
             config = {"target_language": "ch", "paper_list": []}
-            old_cwd = Path.cwd()
-
-            try:
-                os.chdir(root)
+            with temporary_cwd(root):
                 with patch("src.tui.runner.runtime.load_runtime_config", return_value=config) as load_config:
                     with patch(
                         "src.tui.runner.runtime.prepare_projects",
@@ -76,8 +73,6 @@ class TuiRunnerTests(unittest.TestCase):
                             return_value={"completed_projects": [], "failed_projects": []},
                         ):
                             run_tui_task("config/ui.toml", "arxiv", ["2508.18791"], {}, lambda event: None)
-            finally:
-                os.chdir(old_cwd)
 
             self.assertTrue((config_dir / "ui.toml").is_file())
             self.assertEqual(load_config.call_args.kwargs["config_path"], str(config_dir / "ui.toml"))
