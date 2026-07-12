@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-<img src="./logo.png" width="100%"></img>
+<img src="./assets/logo.png" width="100%"></img>
 
   **LaTeXTransPlus**
 
@@ -30,6 +30,14 @@
 LaTeXTransPlus 是一个基于原 LaTeXTrans 项目开发的 LaTeX 论文翻译工具。它直接翻译 LaTeX 源码项目，而不是翻译已经渲染后的 PDF，然后重构翻译后的 LaTeX 项目并编译生成 PDF。
 
 当前实现会协调 Parser、Terminology Generator、Translator、Validator 和 PDF Generator 完成工作流。项目支持从 arXiv 下载源码、处理本地 LaTeX 项目、处理压缩源码包、生成项目级术语表、配置源语言与目标语言、基于校验结果自动重译，并为每个项目保存 workflow 日志。
+
+LaTeXTransPlus 也提供基于 Textual 的终端 UI，可通过 `latextrans-tui` 启动。TUI 支持新建任务、项目管理、设置调整、进度跟踪，并能在同一个终端界面中查看生成结果。
+
+## 终端 UI 预览
+
+<div align="center">
+  <img src="./assets/entry.png" alt="LaTeXTransPlus 终端 UI 截图" width="100%"></img>
+</div>
 
 # ✨ 功能特性
 

@@ -2,7 +2,7 @@
 
 English | [中文](README_ZH.md)
 
-<img src="./logo.png" width="100%"></img>
+<img src="./assets/logo.png" width="100%"></img>
 
   **LaTeXTransPlus**
 
@@ -30,6 +30,14 @@ English | [中文](README_ZH.md)
 LaTeXTransPlus is a LaTeX paper translation tool developed based on the original LaTeXTrans project. It translates LaTeX source projects directly instead of translating rendered PDFs, then reconstructs and compiles the translated LaTeX project into a PDF.
 
 The current implementation coordinates a parser, terminology generator, translator, validator, and PDF generator. It supports arXiv source downloads, local LaTeX projects, compressed source archives, project-level terminology extraction, configurable source and target languages, validation-driven retranslation, and per-project workflow logs.
+
+LaTeXTransPlus also includes a Textual-based terminal UI through `latextrans-tui`. The TUI provides task creation, project management, settings, progress tracking, and access to generated results from a single terminal screen.
+
+## Terminal UI Preview
+
+<div align="center">
+  <img src="./assets/entry.png" alt="LaTeXTransPlus terminal UI screenshot" width="100%"></img>
+</div>
 
 # ✨ Features
 
