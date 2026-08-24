@@ -8,3 +8,4 @@ config/default.toml
 config/ui.toml
 outputs
 tex source
+LaTeXTrans.egg-info/
